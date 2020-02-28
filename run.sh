@@ -1,4 +1,4 @@
 . venv/bin/activate
-export FLASK_APP=root.py
+export FLASK_APP=app
 flask run
 

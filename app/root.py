@@ -1,47 +1,20 @@
 import csv
-import inspect
 import io
 import json
 import traceback
 from typing import Union
 
 from bson import ObjectId
-from flask import Flask, render_template, url_for, request
-from pymongo import MongoClient
+from flask import render_template, url_for, request
 from pymongo.cursor import Cursor
 
-app = Flask(__name__)
-app.logger.setLevel('DEBUG')
-
-# global connection (will do things maximally straightforward
-# until meet the problems)
-
-global mongo_client
-mongo_client = MongoClient('mongodb://localhost:27017,127.0.0.1:27018/?replicaSet=rs0')
+from app import app, _db, transactional
 
 
 @app.route('/')
 def root():
     return render_template('spa.html',
                            fe_root=url_for('static', filename='main.js'))
-
-
-def transactional(foo):
-    def foo_in_transaction(*args, **kwargs):
-        session = mongo_client.start_session()
-        session.start_transaction()
-        try:
-            if 'session' in inspect.getargspec(foo).args:
-                kwargs['session'] = session
-            result = foo(*args, **kwargs)
-            session.commit_transaction()
-            return result
-        except Exception as e:
-            session.abort_transaction()
-            raise e
-
-    foo_in_transaction.__name__ = foo.__name__
-    return foo_in_transaction
 
 
 @app.route('/ds', methods=['PUT'])
@@ -105,10 +78,6 @@ def update_ds_list_record(ds_id: Union[str, ObjectId], d: dict, session=None):
     _db()['ds_list'].update_one({'_id': ObjectId(ds_id)}, {
         '$set': d
     }, session=session)
-
-
-def _db():
-    return mongo_client.get_database('sadist')
 
 
 def create_ds_list_blank_record(csv_file, type, extra, session=None):

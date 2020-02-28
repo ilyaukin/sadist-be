@@ -1,5 +1,7 @@
 *.iml
 .idea
 __pycache__
+**/*.egg-info
+**/static
 venv
 
