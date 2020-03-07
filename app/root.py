@@ -14,7 +14,7 @@ from app import app, _db, transactional
 @app.route('/')
 def root():
     return render_template('spa.html',
-                           fe_root=url_for('static', filename='main.js'))
+                           fe_root=url_for('static', filename='root.js'))
 
 
 @app.route('/ds', methods=['PUT'])
