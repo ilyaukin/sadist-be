@@ -1,4 +1,4 @@
-from typing import List, Set, Dict, Hashable, Iterable, Tuple, Union
+from typing import List, Set, Dict, Hashable, Iterable, Tuple, Union, Optional
 
 from app import _db, app
 from bson import ObjectId
@@ -53,13 +53,15 @@ class PatternClassifier(AbstractClassifier):
             patterns[pattern].add_label(label)
 
         pattern_elements: Set[Tuple[Hashable, int]] = set()
-        likelihood: Dict[Tuple[Tuple[Hashable, int], Tuple[Hashable, int]], float] = dict()
+        likelihood: Dict[
+            Tuple[Tuple[Hashable, int], Tuple[Hashable, int]], float] = dict()
 
         def update_likelihood(patterns: Dict[Pattern, SampleCount]):
             pattern_elements.clear()
             likelihood.clear()
             count_prev_element_to_element: \
-                Dict[Tuple[Tuple[Hashable, int], Tuple[Hashable, int]], int] = dict()
+                Dict[Tuple[Tuple[Hashable, int], Tuple[
+                    Hashable, int]], int] = dict()
             count_prev_element_total: Dict[Tuple[Hashable, int]] = dict()
 
             for pattern, sample_count in patterns.items():
@@ -90,7 +92,8 @@ class PatternClassifier(AbstractClassifier):
 
         while True:
             prev_level_patterns = dict((pattern, sample_count)
-                                       for pattern, sample_count in patterns.items()
+                                       for pattern, sample_count in
+                                       patterns.items()
                                        if pattern.level == level)
             update_likelihood(prev_level_patterns)
 
@@ -100,7 +103,8 @@ class PatternClassifier(AbstractClassifier):
             cluster: Set[Tuple[Hashable, int]] = set()
             cluster_coupling = 0
             prev_level_pattern_element_count = len(pattern_elements)
-            prev_level_pattern_element_to_char: Dict[Tuple[Hashable, int], Char] = \
+            prev_level_pattern_element_to_char: Dict[
+                Tuple[Hashable, int], Char] = \
                 dict()
 
             def add_char(cluster: Set[Tuple[Hashable, int]]):
@@ -113,8 +117,10 @@ class PatternClassifier(AbstractClassifier):
             while len(pattern_elements):
                 pattern_element_with_max_coupling = \
                     max(pattern_elements,
-                        key=lambda pattern_element: coupling(cluster.union({pattern_element})))
-                if coupling(cluster.union(pattern_element_with_max_coupling)) >= cluster_coupling:
+                        key=lambda pattern_element: coupling(
+                            cluster.union({pattern_element})))
+                if coupling(cluster.union(
+                    pattern_element_with_max_coupling)) >= cluster_coupling:
                     cluster.add(pattern_element_with_max_coupling)
                     cluster_coupling = coupling(cluster)
                     pattern_elements.remove(pattern_element_with_max_coupling)
@@ -134,9 +140,11 @@ class PatternClassifier(AbstractClassifier):
 
             for prev_level_pattern, sample_count in prev_level_patterns.items():
                 pattern = Pattern(level=level,
-                                  sequence=[prev_level_pattern_element_to_char[prev_level_pattern_element]
+                                  sequence=[prev_level_pattern_element_to_char[
+                                                prev_level_pattern_element]
                                             for prev_level_pattern_element
-                                            in prev_level_pattern.get_pattern()])
+                                            in
+                                            prev_level_pattern.get_pattern()])
                 patterns.setdefault(pattern, SampleCount())
                 patterns[pattern].merge(sample_count)
 
@@ -151,8 +159,7 @@ class PatternClassifier(AbstractClassifier):
         while True:
             # check if the s's pattern of current level
             # matches one of patterns
-            patterns = dict(Pattern.deserialize(record)
-                            for record in _db()['cl_pattern'].find({'level': level}))
+            patterns = Cache.get_patterns_by_level(level)
             for pattern, sample_count in patterns.items():
                 if pattern == s_pattern:
                     # make democracy here:
@@ -166,23 +173,17 @@ class PatternClassifier(AbstractClassifier):
 
             # make a pattern of a higher level
             level += 1
-            chars = set(Char.deserialize(char) for
-                        char in _db()['cl_pattern_char'].find({'level': level}))
+            chars = Cache.get_chars_by_level(level)
             if not chars:
                 break
-            for char in chars:
-                CharCache.add(char)
-            pattern_element_to_char: Dict[Tuple[Hashable, int], Char] = dict()
             sequence: List[Char] = list()
-            for char in chars:
-                for pattern_element in char.char:
-                    pattern_element_to_char[pattern_element] = char
             for pattern_element in s_pattern.pattern:
-                char = pattern_element_to_char.get(pattern_element)
+                char = Cache.get_char_by_pattern_element(pattern_element)
                 if not char:
                     app.logger.warn('Pattern element (%s, %s) does not match'
                                     'any char of level %d' %
-                                    (pattern_element[0], pattern_element[1], level))
+                                    (pattern_element[0], pattern_element[1],
+                                     level))
                     return None
                 sequence.append(char)
 
@@ -197,14 +198,14 @@ class PatternClassifier(AbstractClassifier):
         _db()['cl_pattern_char'].delete_many({})
 
         # clear cache
-        CharCache.clear()
-
+        Cache.clear()
 
 
 class Char(object):
     """
     Character of a higher level
     """
+
     def __init__(self, level: int, cluster: Set[Tuple[Hashable, int]]):
         self._id = 0
         self.level = level
@@ -227,8 +228,8 @@ class Char(object):
         }
 
     def save(self):
-        self._id = _db()['cl_pattern_char']\
-            .insert_one(self.serialize())\
+        self._id = _db()['cl_pattern_char'] \
+            .insert_one(self.serialize()) \
             .inserted_id
 
     @staticmethod
@@ -256,36 +257,10 @@ class Char(object):
 
     @staticmethod
     def object_or_literal(char):
-        return CharCache.get(char) if isinstance(char, ObjectId) else char
+        return Cache.get_char(char) if isinstance(char, ObjectId) else char
 
     def __str__(self):
         return str(self.serialize())
-
-
-class CharCache(object):
-    """
-    Cached on-demand chars from DB
-    """
-    cache: Dict[ObjectId, Char] = dict()
-
-    @staticmethod
-    def get(_id: ObjectId) -> Char:
-        if _id in CharCache.cache:
-            return CharCache.cache[_id]
-
-        record = _db()['cl_pattern_char'].find_one({'_id': _id})
-        if not record:
-            raise KeyError(_id)
-        CharCache.cache[_id] = Char.deserialize(record)
-        return CharCache.cache[_id]
-
-    @staticmethod
-    def add(char: Char):
-        CharCache.cache[char._id] = char
-
-    @staticmethod
-    def clear():
-        CharCache.cache.clear()
 
 
 class Pattern(object):
@@ -312,7 +287,7 @@ class Pattern(object):
     def get_pattern(self) -> Iterable[Tuple[Hashable, int]]:
         return self.pattern
 
-    def serialize(self, sample_count: 'SampleCount'=None):
+    def serialize(self, sample_count: 'SampleCount' = None):
         d = {
             'level': self.level,
             'pattern': [(Char.id_or_literal(char), count)
@@ -323,8 +298,8 @@ class Pattern(object):
         return d
 
     def save(self, sample_count: 'SampleCount'):
-        self._id = _db()['cl_pattern']\
-            .insert_one(self.serialize(sample_count=sample_count))\
+        self._id = _db()['cl_pattern'] \
+            .insert_one(self.serialize(sample_count=sample_count)) \
             .inserted_id
 
     def __str__(self):
@@ -412,3 +387,63 @@ class Terminated(Iterable):
 
     def __repr__(self):
         return 'Terminated(%s)' % self.i
+
+
+class Cache(object):
+    """
+    Cached on-demand chars, patterns, and pattern elements
+    """
+    chars: Dict[ObjectId, Char] = dict()
+    chars_by_level: Dict[int, Set[Char]] = dict()
+    patterns_by_level: Dict[int, Dict[Pattern, SampleCount]] = dict()
+    pattern_element_to_char: Dict[Tuple[Hashable, int], Char] = dict()
+
+    @staticmethod
+    def get_char(_id: ObjectId) -> Char:
+        if _id in Cache.chars:
+            return Cache.chars[_id]
+
+        record = _db()['cl_pattern_char'].find_one({'_id': _id})
+        if not record:
+            raise KeyError(_id)
+        Cache.chars[_id] = Char.deserialize(record)
+        return Cache.chars[_id]
+
+    @staticmethod
+    def get_chars_by_level(level: int) -> Set[Char]:
+        if level in Cache.chars_by_level:
+            return Cache.chars_by_level[level]
+
+        chars = set(Char.deserialize(char) for
+                    char in _db()['cl_pattern_char'].find({'level': level}))
+        Cache.chars_by_level[level] = chars
+        if chars:
+            for char in chars:
+                Cache.chars[char._id] = char
+                for pattern_element in char.char:
+                    Cache.pattern_element_to_char[pattern_element] = char
+
+        return chars
+
+    @staticmethod
+    def get_patterns_by_level(level: int) -> Dict[Pattern, SampleCount]:
+        if level in Cache.patterns_by_level:
+            return Cache.patterns_by_level[level]
+
+        patterns = dict(Pattern.deserialize(record)
+                        for record in
+                        _db()['cl_pattern'].find({'level': level}))
+        Cache.patterns_by_level[level] = patterns
+        return patterns
+
+    @staticmethod
+    def get_char_by_pattern_element(pattern_element: Tuple[Hashable, int]) -> \
+        Optional[Char]:
+        return Cache.pattern_element_to_char.get(pattern_element)
+
+    @staticmethod
+    def clear():
+        Cache.chars.clear()
+        Cache.chars_by_level.clear()
+        Cache.patterns_by_level.clear()
+        Cache.pattern_element_to_char.clear()

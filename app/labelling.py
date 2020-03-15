@@ -80,6 +80,7 @@ def label_sample(session_id):
     collection_name = 'dl_session_%s' % session_id
     session_collection = _db()[collection_name]
     text = request.form['text']
+    text = text.replace('\r\n', '\n')
     label = request.form['label']
     # UI sends only one label, but we`ll save a list
     # to be able generalize in the future

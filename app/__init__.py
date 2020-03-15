@@ -1,7 +1,9 @@
 import inspect
+import os
 
 from flask import Flask
 from pymongo import MongoClient
+from pymongo.database import Database
 
 app = Flask(__name__)
 app.logger.setLevel('DEBUG')
@@ -9,12 +11,18 @@ app.logger.setLevel('DEBUG')
 # global connection (will do things maximally straightforward
 # until meet the problems)
 
-global mongo_client
-mongo_client = MongoClient('mongodb://localhost:27017,127.0.0.1:27018/?replicaSet=rs0')
+mongo_client_pool = dict()
 
 
-def _db():
-    return mongo_client.get_database('sadist')
+def _mongo_client():
+    pid = os.getpid()
+    mongo_client_pool.setdefault(pid,
+                                 MongoClient('mongodb://localhost:27017,127.0.0.1:27018/?replicaSet=rs0'))
+    return mongo_client_pool[pid]
+
+
+def _db() -> Database:
+    return _mongo_client().get_database('sadist')
 
 
 def _set(d: dict):
@@ -28,7 +36,7 @@ def _set(d: dict):
 
 def transactional(foo):
     def foo_in_transaction(*args, **kwargs):
-        session = mongo_client.start_session()
+        session = _mongo_client().start_session()
         session.start_transaction()
         try:
             if 'session' in inspect.getargspec(foo).args:

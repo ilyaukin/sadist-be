@@ -1,4 +1,5 @@
 import csv
+import csv
 import io
 import json
 import traceback
@@ -9,6 +10,8 @@ from flask import render_template, url_for, request
 from pymongo.cursor import Cursor
 
 from app import app, _db, transactional
+from classification import PatternClassifier, \
+    call_classify_cells
 
 
 @app.route('/')
@@ -37,6 +40,8 @@ def create_ds(session=None):
         # delete failed collection
         _db()[ds_collection_name].drop(session=session)
         return error(e)
+
+    call_classify_cells(ds_id, PatternClassifier())
 
     return {
         'item': serialize(get_ds_list_active_record(csv_file.filename)),

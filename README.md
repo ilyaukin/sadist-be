@@ -4,7 +4,7 @@
 
 ### Python
 
-- Install Python 3.6+.
+- Install Python 3.7+.
 
 - Create virtual env: `python -m venv venv`
 
