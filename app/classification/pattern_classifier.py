@@ -160,16 +160,16 @@ class PatternClassifier(AbstractClassifier):
             # check if the s's pattern of current level
             # matches one of patterns
             patterns = Cache.get_patterns_by_level(level)
-            for pattern, sample_count in patterns.items():
-                if pattern == s_pattern:
-                    # make democracy here:
-                    # if some label got 50+% samples,
-                    # choose this label
-                    for label, count in sample_count.count_by_label.items():
-                        if count / sample_count.count_total > .5:
-                            app.logger.info('Matched s=%s by %s with vote %s' %
-                                            (s, pattern, sample_count))
-                            return label
+            sample_count = patterns.get(s_pattern)
+            if sample_count:
+                # make democracy here:
+                # if some label got 50+% samples,
+                # choose this label
+                for label, count in sample_count.count_by_label.items():
+                    if count / sample_count.count_total > .5:
+                        app.logger.info('Matched s=%s by %s with vote %s' %
+                                        (s, s_pattern, sample_count))
+                        return label
 
             # make a pattern of a higher level
             level += 1

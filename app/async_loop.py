@@ -1,17 +1,15 @@
-import asyncio
-from threading import Thread
+import atexit
+from concurrent.futures.thread import ThreadPoolExecutor
+from typing import Callable
 
-loop = asyncio.new_event_loop()
-
-
-def run_loop(loop):
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
+_tp = ThreadPoolExecutor(max_workers=1)
 
 
-t = Thread(target=run_loop, args=(loop,))
-t.start()
+def _shutdown():
+    _tp.shutdown()
+
+atexit.register(_shutdown)
 
 
-def call_async(coro):
-    asyncio.run_coroutine_threadsafe(coro, loop)
+def call_async(fn: Callable, *args, **kwargs):
+    _tp.submit(fn, *args, **kwargs)

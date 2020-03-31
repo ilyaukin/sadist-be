@@ -87,25 +87,14 @@ def call_classify_cells(ds_id: Union[str, ObjectId],
     :param classifier: Classifier
     :return:
     """
-    call_async(_async_classify_cells(ds_id, classifier))
-
-
-async def _async_classify_cells(ds_id: Union[str, ObjectId],
-                                classifier: AbstractClassifier):
-    """
-    Async co-routine to call classify_cells
-    :param ds_id: Data source ID
-    :param classifier: Classifier
-    :return:
-    """
-    classify_cells(ds_id, classifier)
+    call_async(classify_cells, ds_id, classifier)
 
 
 def _execute_task(classifier: AbstractClassifier,
                   input_queue: multiprocessing.Queue,
                   output_queue: multiprocessing.Queue):
     while not input_queue.empty():
-        cell, value = input_queue.get()
+        cell, value = input_queue.get(timeout=0)
         cell.update({'label': classifier.classify(value)})
         output_queue.put(cell)
 
