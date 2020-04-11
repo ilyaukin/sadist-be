@@ -1,6 +1,7 @@
 import datetime
 import multiprocessing
 import os
+from concurrent.futures._base import Future
 from typing import Union, Tuple, Dict, Optional, Any
 
 from bson import ObjectId
@@ -10,6 +11,8 @@ from async_loop import call_async
 from classification.abstract_classifier import AbstractClassifier
 
 # settings
+from helper import process_queue
+
 MAX_PROCESS_COUNT = os.cpu_count()
 CHUNK_SIZE = 100
 
@@ -79,7 +82,7 @@ def classify_cells(ds_id: Union[str, ObjectId],
 
 
 def call_classify_cells(ds_id: Union[str, ObjectId],
-                        classifier: AbstractClassifier):
+                        classifier: AbstractClassifier) -> Future:
     """
     Call classify_cells and don't wait for
     completion
@@ -87,14 +90,13 @@ def call_classify_cells(ds_id: Union[str, ObjectId],
     :param classifier: Classifier
     :return:
     """
-    call_async(classify_cells, ds_id, classifier)
+    return call_async(classify_cells, ds_id, classifier)
 
 
 def _execute_task(classifier: AbstractClassifier,
                   input_queue: multiprocessing.Queue,
                   output_queue: multiprocessing.Queue):
-    while not input_queue.empty():
-        cell, value = input_queue.get(timeout=0)
+    for cell, value in process_queue(input_queue):
         cell.update({'label': classifier.classify(value)})
         output_queue.put(cell)
 

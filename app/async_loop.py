@@ -1,4 +1,5 @@
 import atexit
+from concurrent.futures._base import Future
 from concurrent.futures.thread import ThreadPoolExecutor
 from typing import Callable
 
@@ -11,5 +12,5 @@ def _shutdown():
 atexit.register(_shutdown)
 
 
-def call_async(fn: Callable, *args, **kwargs):
-    _tp.submit(fn, *args, **kwargs)
+def call_async(fn: Callable, *args, **kwargs) -> 'Future':
+    return _tp.submit(fn, *args, **kwargs)

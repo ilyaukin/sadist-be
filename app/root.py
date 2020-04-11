@@ -1,8 +1,8 @@
 import csv
-import csv
 import io
 import json
 import traceback
+from concurrent.futures._base import Future
 from typing import Union
 
 from bson import ObjectId
@@ -12,6 +12,7 @@ from pymongo.cursor import Cursor
 from app import app, _db, transactional
 from classification import PatternClassifier, \
     call_classify_cells
+from detailization import call_get_details_for_all_cols
 
 
 @app.route('/')
@@ -41,7 +42,7 @@ def create_ds(session=None):
         _db()[ds_collection_name].drop(session=session)
         return error(e)
 
-    call_classify_cells(ds_id, PatternClassifier())
+    process_ds(ds_id)
 
     return {
         'item': serialize(get_ds_list_active_record(csv_file.filename)),
@@ -77,6 +78,14 @@ def add_ds(csv_file, ds_id, ds_collection_name, session=None):
     if old_record:
         update_ds_list_record(old_record['_id'], {'status': 'old'}, session=session)
     update_ds_list_record(ds_id, {'status': 'active', 'cols': csv_reader.fieldnames}, session=session)
+
+
+def process_ds(ds_id):
+    def on_classify_done(future: Future):
+        call_get_details_for_all_cols(ds_id)
+
+    call_classify_cells(ds_id, PatternClassifier())\
+        .add_done_callback(on_classify_done)
 
 
 def update_ds_list_record(ds_id: Union[str, ObjectId], d: dict, session=None):
