@@ -5,6 +5,9 @@ from flask import Flask
 from pymongo import MongoClient
 from pymongo.database import Database
 
+DATABASE_URL = os.environ.get('DATABASE_URL') or\
+               'mongodb://localhost:27017,127.0.0.1:27018/sadist?replicaSet=rs0'
+
 app = Flask(__name__)
 app.logger.setLevel('DEBUG')
 
@@ -14,15 +17,15 @@ app.logger.setLevel('DEBUG')
 mongo_client_pool = dict()
 
 
-def _mongo_client():
+def _mongo_client() -> MongoClient:
     pid = os.getpid()
     mongo_client_pool.setdefault(pid,
-                                 MongoClient('mongodb://localhost:27017,127.0.0.1:27018/?replicaSet=rs0'))
+                                 MongoClient(DATABASE_URL))
     return mongo_client_pool[pid]
 
 
 def _db() -> Database:
-    return _mongo_client().get_database('sadist')
+    return _mongo_client().get_database()
 
 
 def _set(d: dict):
