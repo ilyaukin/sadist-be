@@ -1,8 +1,8 @@
 import inspect
 import os
+import pymongo
 
 from flask import Flask
-from pymongo import MongoClient
 from pymongo.database import Database
 
 DATABASE_URL = os.environ.get('DATABASE_URL') or\
@@ -17,10 +17,10 @@ app.logger.setLevel('DEBUG')
 mongo_client_pool = dict()
 
 
-def _mongo_client() -> MongoClient:
+def _mongo_client() -> pymongo.MongoClient:
     pid = os.getpid()
     mongo_client_pool.setdefault(pid,
-                                 MongoClient(DATABASE_URL))
+                                 pymongo.MongoClient(DATABASE_URL))
     return mongo_client_pool[pid]
 
 
