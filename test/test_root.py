@@ -93,31 +93,6 @@ def client():
 def test_visualize(client):
     prepare_dataset()
 
-    for iii in _db()['ds_1111_classification'].aggregate([
-        {'$group': {'_id': '$row', 'colDet': {
-            '$push': {'col': '$col', 'details': '$details'}}}},
-        # here is mongomock bug ($arrayElemAt applied to result of $filter
-        # does not work.. todo: fix bug and make this test work
-        {'$project': {
-            'Location': {'$arrayElemAt': [{
-                '$filter': {
-                    'input': '$colDet',
-                    'cond': {'$literal': True}
-                }
-            }, 0]}
-        }}
-
-        # {'$project': {
-        #     'Location': {'$arrayElemAt': [{'$filter': {'input': '$colDet',
-        #                                                'cond': {
-        #                                                    '$eq': ['$$this.col',
-        #                                                            'Location']}}},
-        #                                   0]}}},
-        # {'$project': {'Location': '$Location.details.city'}},
-        # {'$group': {'_id': '$Location', 'count': {'$sum': 1}}}
-    ]):
-        print(iii)
-
     result = client \
         .get('/ds/1111/visualize',
              query_string='pipeline='+json.dumps([{'col': 'Location', 'key': 'city'}])) \

@@ -37,3 +37,10 @@ Must be installed as a replica set.
 MacOS: [Instruction](https://medium.com/@OndrejKvasnovsky/mongodb-replica-set-on-local-macos-f5fc383b3fd6)
 <br/>
 (TODO: make a script)
+
+
+### Tests
+
+- Install test requirements: `pip install -r requirements-test.txt --extra-index-url http://my-handicapped-pet.io:3141/ilyaukin/dev`
+(note that we use custom devpi server with dev library version because of the bug in mongomock)
+- Run `pytest`
