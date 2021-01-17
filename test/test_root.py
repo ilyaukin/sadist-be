@@ -51,6 +51,11 @@ def prepare_dataset():
             '_id': 4,
             'Location': 'NYC',
             'Comment': '4444'
+        },
+        {
+            '_id': 5,
+            'Location': '???',
+            'Comment': '9999'
         }
     ])
     ds_classification_collection.delete_many({})
@@ -98,6 +103,11 @@ def prepare_dataset():
                     'coordinates': [-74.00597, 40.71427]
                 }
             }
+        },
+        {
+            '_id': 5,
+            'col': 'Location',
+            'row': 5
         }
     ])
 
@@ -139,6 +149,10 @@ def test_visualize(client):
                 'coordinates': [-74.00597, 40.71427]
             },
             'count': 1
+        },
+        {
+            'id': None,
+            'count': 1
         }
     ]
     TestCase().assertCountEqual(expected_list, result["list"])
@@ -167,6 +181,29 @@ def test_filter(client):
             'id': 3,
             'Location': 'MOscow',
             'Comment': '2344'
+        },
+    ]
+    TestCase().assertCountEqual(expected_list, result['list'])
+
+
+@DB_PATCH
+def test_filter_uncategorized(client):
+    prepare_dataset()
+
+    result = client \
+        .get('/ds/1111/filter',
+             query_string='query=' + json.dumps(
+                 [{'col': 'Location', 'key': 'city.name',
+                   'values': [None]}])) \
+        .get_json()
+    assert isinstance(result, dict)
+    assert result['success'] == True
+
+    expected_list = [
+        {
+            '_id': 5,
+            'Location': '???',
+            'Comment': '9999'
         },
     ]
     TestCase().assertCountEqual(expected_list, result['list'])
