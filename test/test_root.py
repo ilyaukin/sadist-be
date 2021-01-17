@@ -1,10 +1,26 @@
 import json
-from unittest import TestCase
+import os
+from unittest import TestCase, mock
 
 import mongomock
+import pymongo
 import pytest
 
 from app import app, _db
+
+if os.getenv('USE_MONGOMOCK'):
+    DB_PATCH = mongomock.patch(
+        servers=(('localhost', 27017), ('localhost', 27018)))
+else:
+    test_client = pymongo.MongoClient(
+        'mongodb://localhost:27017,127.0.0.1:27018/test_sadist_be?replicaSet=rs0')
+
+
+    def _get_test_client(*args, **kwargs):
+        return test_client
+
+
+    DB_PATCH = mock.patch('pymongo.MongoClient', _get_test_client)
 
 
 def prepare_dataset():
@@ -14,6 +30,7 @@ def prepare_dataset():
     ds_collection = _db()[ds_collection_name]
     ds_classification_collection = _db()[ds_classification_collection_name]
 
+    ds_collection.delete_many({})
     ds_collection.insert_many([
         {
             '_id': 1,
@@ -36,6 +53,7 @@ def prepare_dataset():
             'Comment': '4444'
         }
     ])
+    ds_classification_collection.delete_many({})
     ds_classification_collection.insert_many([
         {
             '_id': 1,
@@ -89,13 +107,14 @@ def client():
     return app.test_client()
 
 
-@mongomock.patch(servers=(('localhost', 27017), ('localhost', 27018)))
+@DB_PATCH
 def test_visualize(client):
     prepare_dataset()
 
     result = client \
         .get('/ds/1111/visualize',
-             query_string='pipeline='+json.dumps([{'col': 'Location', 'key': 'city'}])) \
+             query_string='pipeline=' + json.dumps(
+                 [{'col': 'Location', 'key': 'city'}])) \
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
@@ -123,3 +142,31 @@ def test_visualize(client):
         }
     ]
     TestCase().assertCountEqual(expected_list, result["list"])
+
+
+@DB_PATCH
+def test_filter(client):
+    prepare_dataset()
+
+    result = client \
+        .get('/ds/1111/filter',
+             query_string='query=' + json.dumps(
+                 [{'col': 'Location', 'key': 'city.name',
+                   'values': ['Moscow']}])) \
+        .get_json()
+    assert isinstance(result, dict)
+    assert result['success'] == True
+
+    expected_list = [
+        {
+            'id': 1,
+            'Location': 'Moscow',
+            'Comment': '1111'
+        },
+        {
+            'id': 3,
+            'Location': 'MOscow',
+            'Comment': '2344'
+        },
+    ]
+    TestCase().assertCountEqual(expected_list, result['list'])
