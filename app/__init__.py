@@ -6,7 +6,7 @@ from flask import Flask
 from pymongo.database import Database
 
 DATABASE_URL = os.environ.get('DATABASE_URL') or\
-               'mongodb://localhost:27017,127.0.0.1:27018/sadist?replicaSet=rs0'
+               'mongodb://127.0.0.1:27017,127.0.0.1:27018/sadist?replicaSet=rs0'
 
 app = Flask(__name__)
 app.logger.setLevel('DEBUG')
