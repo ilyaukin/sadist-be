@@ -1,12 +1,16 @@
 from typing import Dict
 
-from app import _db
+from db import conn, geo_country
 from detailization.abstract_detailizer import AbstractDetailizer
+from mongomoron import query_one
 
 
 class CountryDetailizer(AbstractDetailizer):
     def get_details(self, value: str) -> Dict[str, object]:
-        country = _db()['geo_country'].find_one({'name': value})
+        country = conn.execute(
+            query_one(geo_country).filter(geo_country.name == value)
+        )
+
         if country:
             return {
                 'country': {

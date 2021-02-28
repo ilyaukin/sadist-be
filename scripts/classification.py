@@ -1,10 +1,11 @@
 import inspect
+import sys
 from argparse import ArgumentParser
 
 import app.classification as classification
-import sys
-from app import _db
 from classification import classify_cells
+from db import conn, dl_master
+from mongomoron import query
 
 
 def help_classifier_names():
@@ -24,9 +25,8 @@ if __name__ == '__main__':
 
     classifier = getattr(classification, args.classifier)()
     if args.action == 'l':
-        dl_master = _db()['dl_master']
         classifier.learn([(record['text'], record['labels'][0])
-                          for record in dl_master.find()])
+                          for record in conn.execute(query(dl_master))])
     elif args.action == 'c':
         if args.ds:
             classify_cells(args.ds, classifier)

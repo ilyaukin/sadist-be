@@ -47,6 +47,6 @@ DB (see above).<br/>
 To run test using mongomock `export USE_MONGOMOCK=1`. Some tests
 may fail in this case so far because not all features of mongo are
 implemented in mongomock.
-- Install test requirements: `pip install -r requirements-test.txt --extra-index-url http://my-handicapped-pet.io:3141/ilyaukin/dev`
+- Install test requirements: `pip install -r requirements-test.txt --extra-index-url http://my-handicapped-pet.io:3141/ilyaukin/dev --trusted-host my-handicapped-pet.io`
 (note that we use custom devpi server with dev library version because of the bug in mongomock)
 - Run `pytest`

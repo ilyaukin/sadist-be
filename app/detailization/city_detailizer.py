@@ -1,8 +1,9 @@
 import re
 from typing import Dict
 
-from app import _db
+from db import conn, geo_city, geo_country
 from detailization.abstract_detailizer import AbstractDetailizer
+from mongomoron import query, query_one
 
 
 class CityDetailizer(AbstractDetailizer):
@@ -20,7 +21,12 @@ class CityDetailizer(AbstractDetailizer):
         for city_name_candidate in city_name_candidates:
             # todo consider other parts to distinguish
             # cities with the same name in different countries
-            cursor = _db()['geo_city'].find({'name': city_name_candidate}) \
+            cursor = conn.execute(
+                query(geo_city) \
+                    .filter(geo_city.name == city_name_candidate)
+            )
+
+            cursor \
                 .sort([('population', -1)]) \
                 .limit(1)
             for city in cursor:
@@ -37,11 +43,13 @@ class CityDetailizer(AbstractDetailizer):
                 }
         return {}
 
-    def _get_country(self, country_code):
+    def _get_country(self, country_code: str):
         country = self.country_cache.get(country_code)
         if country:
             return country
 
-        country = _db()['geo_country'].find_one({'_id': country_code})
+        country = conn.execute(
+            query_one(geo_country).filter(geo_country._id == country_code)
+        )
         self.country_cache[country_code] = country
         return country

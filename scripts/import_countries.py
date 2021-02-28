@@ -10,10 +10,10 @@ https://github.com/arusanov/geonames-mongo-import
 Cities info will be used to define average geo location
 of each country.
 """
-import csv
 from argparse import ArgumentParser
 
-from app import _db
+from db import conn, geo_city, geo_country
+from mongomoron import query, insert_many
 
 
 def import_countries(filename: str):
@@ -31,7 +31,7 @@ def import_countries(filename: str):
     cities_by_country = dict((country['_id'], [])
                              for country in countries)
 
-    for city in _db()['geo_city'].find():
+    for city in conn.execute(query(geo_city)):
         cities_by_country[city['country_code']].append(city)
 
     for country in countries:
@@ -46,7 +46,7 @@ def import_countries(filename: str):
         country.update(
             {'loc': {'type': 'Point', 'coordinates': country_coordinates}})
 
-    _db()['geo_country'].insert_many(countries)
+    conn.execute(insert_many(geo_country, countries))
 
 
 if __name__ == '__main__':
