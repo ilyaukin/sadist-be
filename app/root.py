@@ -172,7 +172,8 @@ def add_ds(ds_id, csv_file):
 
 def process_ds(ds_id):
     def on_classify_done(future: Future):
-        call_get_details_for_all_cols(ds_id)
+        if not future.exception():
+            call_get_details_for_all_cols(ds_id)
 
     call_classify_cells(ds_id, PatternClassifier()) \
         .add_done_callback(on_classify_done)

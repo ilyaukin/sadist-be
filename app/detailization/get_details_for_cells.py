@@ -1,6 +1,7 @@
 import inspect
 import multiprocessing
 import os
+import traceback
 from concurrent.futures._base import Future
 from typing import Union, Type, Iterable
 
@@ -71,7 +72,16 @@ def get_details_for_cells(ds_id: Union[str, ObjectId],
 def call_get_details_for_cells(ds_id: Union[str, ObjectId],
                                col: str,
                                detailizer: AbstractDetailizer) -> Future:
-    return call_async(get_details_for_cells, ds_id, col, detailizer)
+    def _handle_async_exception(f: Future):
+        e = f.exception()
+        if e:
+            app.logger.error(traceback.format_exc())
+            _update_ds_list_record(ds_id, col,
+                                   {'status': 'failed', 'error': str(e)})
+
+    f = call_async(get_details_for_cells, ds_id, col, detailizer)
+    f.add_done_callback(_handle_async_exception)
+    return f
 
 
 def call_get_details_for_all_cols(ds_id: Union[str, ObjectId]) -> Iterable[

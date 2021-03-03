@@ -1,10 +1,12 @@
 import logging
+import logging.config
+import os
 
 from flask import Flask
 
 app = Flask(__name__)
-# TODO move all logging settings to the config file
-app.logger.setLevel('DEBUG')
-logging.getLogger('mongomoron').setLevel('DEBUG')
+
+if os.path.exists('logging.ini'):
+    logging.config.fileConfig('logging.ini')
 
 from . import root, labelling

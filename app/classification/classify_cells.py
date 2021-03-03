@@ -1,18 +1,20 @@
 import datetime
 import multiprocessing
 import os
+import traceback
 from concurrent.futures._base import Future
 from typing import Union, Optional, Any
 
+from app import app
 from async_loop import call_async
 from bson import ObjectId
 from classification.abstract_classifier import AbstractClassifier
 from db import conn, ds_classification, ds, ds_list, cl_stat
-# settings
 from helper import process_queue
 from mongomoron import index, query, insert_many, update, insert_one, aggregate, \
     avg
 
+# settings
 MAX_PROCESS_COUNT = os.cpu_count()
 CHUNK_SIZE = 100
 
@@ -27,9 +29,9 @@ def classify_cells(ds_id: Union[str, ObjectId],
     :return:
     """
 
-    classification_collection = conn.create_collection(ds_classification[ds_id])
-    conn.create_index(index(classification_collection).asc('row'))
-    conn.create_index(index(classification_collection).asc('col'))
+    conn.create_collection(ds_classification[ds_id])
+    conn.create_index(index(ds_classification[ds_id]).asc('row'))
+    conn.create_index(index(ds_classification[ds_id]).asc('col'))
 
     # task is a tuple cell, value, where
     # cell is a dict (row=row, col=col);
@@ -65,11 +67,11 @@ def classify_cells(ds_id: Union[str, ObjectId],
         cells.append(cell)
 
         if len(cells) >= CHUNK_SIZE:
-            conn.execute(insert_many(classification_collection, cells))
+            conn.execute(insert_many(ds_classification[ds_id], cells))
             cells.clear()
 
     if cells:
-        conn.execute(insert_many(classification_collection, cells))
+        conn.execute(insert_many(ds_classification[ds_id], cells))
 
     _update_ds_list_record(ds_id, {
         'status': 'finished'
@@ -86,7 +88,16 @@ def call_classify_cells(ds_id: Union[str, ObjectId],
     :param classifier: Classifier
     :return:
     """
-    return call_async(classify_cells, ds_id, classifier)
+
+    def _handle_async_exception(f: Future):
+        e = f.exception()
+        if e:
+            app.logger.error(traceback.format_exc())
+            _update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
+
+    f = call_async(classify_cells, ds_id, classifier)
+    f.add_done_callback(_handle_async_exception)
+    return f
 
 
 def _execute_task(classifier: AbstractClassifier,
