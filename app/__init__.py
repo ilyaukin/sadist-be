@@ -55,4 +55,4 @@ def transactional(foo):
     return foo_in_transaction
 
 
-from . import root, labelling
+from . import root, labelling, debug
