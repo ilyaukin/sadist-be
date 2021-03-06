@@ -1,8 +1,10 @@
 from typing import List, Set, Dict, Hashable, Iterable, Tuple, Union, Optional
 
-from app import _db, app
+from app import app
 from bson import ObjectId
 from classification.abstract_classifier import AbstractClassifier
+from db import cl_pattern, conn, cl_pattern_char
+from mongomoron import delete, insert_one, query_one, query
 
 
 class PatternClassifier(AbstractClassifier):
@@ -120,7 +122,7 @@ class PatternClassifier(AbstractClassifier):
                         key=lambda pattern_element: coupling(
                             cluster.union({pattern_element})))
                 if coupling(cluster.union(
-                    pattern_element_with_max_coupling)) >= cluster_coupling:
+                        pattern_element_with_max_coupling)) >= cluster_coupling:
                     cluster.add(pattern_element_with_max_coupling)
                     cluster_coupling = coupling(cluster)
                     pattern_elements.remove(pattern_element_with_max_coupling)
@@ -194,8 +196,8 @@ class PatternClassifier(AbstractClassifier):
 
     def _clear_db(self):
         # re-write table, todo: implement incremental update
-        _db()['cl_pattern'].delete_many({})
-        _db()['cl_pattern_char'].delete_many({})
+        conn.execute(delete(cl_pattern))
+        conn.execute(delete(cl_pattern_char))
 
         # clear cache
         Cache.clear()
@@ -228,9 +230,9 @@ class Char(object):
         }
 
     def save(self):
-        self._id = _db()['cl_pattern_char'] \
-            .insert_one(self.serialize()) \
-            .inserted_id
+        self._id = conn.execute(
+            insert_one(cl_pattern_char, self.serialize())
+        ).inserted_id
 
     @staticmethod
     def id_or_literal(char):
@@ -298,9 +300,9 @@ class Pattern(object):
         return d
 
     def save(self, sample_count: 'SampleCount'):
-        self._id = _db()['cl_pattern'] \
-            .insert_one(self.serialize(sample_count=sample_count)) \
-            .inserted_id
+        self._id = conn.execute(
+            insert_one(cl_pattern, self.serialize(sample_count=sample_count))
+        ).inserted_id
 
     def __str__(self):
         return str(self.serialize())
@@ -403,7 +405,10 @@ class Cache(object):
         if _id in Cache.chars:
             return Cache.chars[_id]
 
-        record = _db()['cl_pattern_char'].find_one({'_id': _id})
+        record = conn.execute(
+            query_one(cl_pattern_char) \
+                .filter(cl_pattern_char._id == _id)
+        )
         if not record:
             raise KeyError(_id)
         Cache.chars[_id] = Char.deserialize(record)
@@ -414,8 +419,11 @@ class Cache(object):
         if level in Cache.chars_by_level:
             return Cache.chars_by_level[level]
 
-        chars = set(Char.deserialize(char) for
-                    char in _db()['cl_pattern_char'].find({'level': level}))
+        chars = set(
+            Char.deserialize(char) for char in conn.execute(
+                query(cl_pattern_char).filter(cl_pattern_char.level == level)
+            )
+        )
         Cache.chars_by_level[level] = chars
         if chars:
             for char in chars:
@@ -430,15 +438,17 @@ class Cache(object):
         if level in Cache.patterns_by_level:
             return Cache.patterns_by_level[level]
 
-        patterns = dict(Pattern.deserialize(record)
-                        for record in
-                        _db()['cl_pattern'].find({'level': level}))
+        patterns = dict(
+            Pattern.deserialize(record) for record in conn.execute(
+                query(cl_pattern).filter(cl_pattern.level == level)
+            )
+        )
         Cache.patterns_by_level[level] = patterns
         return patterns
 
     @staticmethod
     def get_char_by_pattern_element(pattern_element: Tuple[Hashable, int]) -> \
-        Optional[Char]:
+            Optional[Char]:
         return Cache.pattern_element_to_char.get(pattern_element)
 
     @staticmethod

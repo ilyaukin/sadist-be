@@ -1,9 +1,13 @@
 import json
 import random
 
-from app import app, _db, _set, transactional
+from app import app
 from bson import ObjectId
+from db import conn, dl_session, dl_session_list, ds, \
+    dl_master
 from flask import request, redirect, render_template, url_for
+from mongomoron import query_one, update_one, query, insert_one, index, \
+    insert_many, document
 
 
 @app.route('/dl/session')
@@ -17,10 +21,8 @@ def session():
 
         # create new session based on data soucre
         # `ds_id` with `limit` capacity
-        collection_name = 'ds_%s' % ds_id
-        ds = _db()[collection_name]
         data = set()
-        for record in ds.find():
+        for record in conn.execute(query(ds[ds_id])):
             del record['_id']
             for value in record.values():
                 s = str(value).strip()
@@ -33,16 +35,17 @@ def session():
         session_values = session_values[:limit]
 
         # add session to dl_session
-        session_id = _db()['dl_session'] \
-            .insert_one({'status': 'open', 'source': ds_id}) \
-            .inserted_id
+        session_id = conn.execute(
+            insert_one(dl_session_list, {'status': 'open', 'source': ds_id})
+        ).inserted_id
 
         # create collection for session values
-        collection_name = 'dl_session_%s' % session_id
-        _db().create_collection(collection_name)
-        session_collection = _db()[collection_name]
-        session_collection.create_index('text', unique=True)
-        session_collection.insert_many({'text': value} for value in session_values)
+        session_collection = conn.create_collection(dl_session[session_id])
+        conn.create_index(index(session_collection).asc('text').unique())
+        conn.execute(
+            insert_many(session_collection, [dict(text=value) for value in
+                                             session_values])
+        )
 
         # redirect to session Page
         return redirect('/dl/session?session_id=' + str(session_id))
@@ -58,9 +61,10 @@ def session():
 
 @app.route('/dl/session/<session_id>', methods=['GET'])
 def next_sample(session_id):
-    collection_name = 'dl_session_%s' % session_id
-    session_collection = _db()[collection_name]
-    sample = session_collection.find_one({'labels': None})
+    sample = conn.execute(
+        query_one(dl_session[session_id]).filter(
+            dl_session[session_id].labels == None)
+    )
 
     if sample:
         return {
@@ -68,7 +72,12 @@ def next_sample(session_id):
             'success': True
         }
 
-    _db()['dl_session'].update_one({'_id': ObjectId(session_id)}, _set({'status': 'finished'}))
+    conn.execute(
+        update_one(dl_session_list) \
+            .filter(dl_session_list._id == ObjectId(session_id)) \
+            .set({'status': 'finished'})
+    )
+
     return {
         'status': 'finished',
         'success': True
@@ -77,30 +86,30 @@ def next_sample(session_id):
 
 @app.route('/dl/session/<session_id>', methods=['POST'])
 def label_sample(session_id):
-    collection_name = 'dl_session_%s' % session_id
-    session_collection = _db()[collection_name]
     text = request.form['text']
     text = text.replace('\r\n', '\n')
     label = request.form['label']
     # UI sends only one label, but we`ll save a list
     # to be able generalize in the future
-    session_collection.update_one({'text': text}, _set({'labels': [label]}))
+    conn.execute(
+        update_one(dl_session[session_id]) \
+            .filter(document.text == text) \
+            .set({'labels': [label]})
+    )
 
     return next_sample(session_id)
 
 
 @app.route('/dl/session/<session_id>/merge', methods=['POST'])
-@transactional
-def merge(session_id, session=None):
-    collection_name = 'dl_session_%s' % session_id
-    session_collection = _db()[collection_name]
-    master_collection = _db()['dl_master']
-
+@conn.transactional
+def merge(session_id):
     session_dict = dict((sample['text'], sample) for sample in
-                        session_collection.find({'labels': {'$ne': None}}))
+                        conn.execute(query(dl_session[session_id]).filter(
+                            document.labels != None)))
 
     master_dict = dict((sample['text'], sample) for sample in
-                       master_collection.find({'text': {'$in': list(session_dict.keys())}}))
+                       conn.execute(query(dl_master).filter(
+                           document.text.in_(list(session_dict.keys())))))
 
     conflicts = []
     for text, master_sample in master_dict.items():
@@ -136,25 +145,37 @@ def merge(session_id, session=None):
 
     if not conflicts:
         # insert new samples
-        master_collection.insert_many(
-            ({'text': text, 'labels': sample['labels']} for text, sample in session_dict.items()
-             if text not in master_dict.keys()),
-            session=session
+        conn.execute(
+            insert_many(dl_master,
+                        ({'text': text, 'labels': sample['labels']} for
+                         text, sample in
+                         session_dict.items()
+                         if text not in master_dict.keys()))
         )
         # update overridden samples
-        for sample in filter(lambda sample: sample.get('override', False), session_dict.values()):
-            master_collection.update_one({'text': sample['text']}, _set({'labels': sample['labels']}),
-                                         session=session)
+        for sample in filter(lambda sample: sample.get('override', False),
+                             session_dict.values()):
+            conn.execute(
+                update_one(dl_master) \
+                    .filter(document.text == sample['text']) \
+                    .set({'labels': sample['labels']})
+            )
 
-        _db()['dl_session'].update_one({'_id': ObjectId(session_id)}, _set({'status': 'merged'}),
-                                       session=session)
+        conn.execute(
+            update_one(dl_session_list) \
+                .filter(dl_session_list._id == ObjectId(session_id))
+                .set({'status': 'merged'})
+        )
         return {
             'status': 'merged',
             'success': True
         }
 
-    _db()['dl_session'].update_one({'_id': ObjectId(session_id)}, _set({'status': 'merging'}),
-                                   session=session)
+    conn.execute(
+        update_one(dl_session_list) \
+            .filter(dl_session_list._id == ObjectId(session_id))
+            .set({'status': 'merging'})
+    )
     return {
         'status': 'merging',
         'conflicts': conflicts,
@@ -167,14 +188,14 @@ def resolve_conflicts(session_id):
     samples_string = request.form['samples']
     samples = json.loads(samples_string)
 
-    collection_name = 'dl_session_%s' % session_id
-    session_collection = _db()[collection_name]
-
     for sample in samples:
         if not isinstance(sample['labels'], list) or not sample['labels']:
             raise Exception('Please specify labels for ' + repr(sample['text']))
-        session_collection.update_one({'text': sample['text']},
-                                      _set({'labels': sample['labels'], 'override': True}))
+        conn.execute(
+            update_one(session[session_id]) \
+                .filter(document.text == label_sample['text']) \
+                .set({'labels': sample['labels'], 'override': True})
+        )
 
     return merge(session_id)
 

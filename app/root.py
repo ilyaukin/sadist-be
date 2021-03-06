@@ -3,16 +3,18 @@ import io
 import json
 import traceback
 from concurrent.futures._base import Future
-from typing import Union
+from typing import Union, Iterable
 
+from accumulator import get_accumulator, CountAccumulator
+from app import app
 from bson import ObjectId
-from flask import render_template, url_for, request
-from pymongo.cursor import Cursor
-
-from app import app, _db, transactional
 from classification import PatternClassifier, \
     call_classify_cells
+from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
+from flask import render_template, url_for, request
+from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
+    filter_, and_, update_one, insert_one, query_one
 
 
 @app.route('/')
@@ -22,7 +24,7 @@ def root():
 
 
 @app.route('/ds', methods=['PUT'])
-def create_ds(session=None):
+def create_ds():
     csv_file = request.files['csv']
     ds_type = request.form['type']
     ds_extra_string = request.form['extra']
@@ -32,14 +34,13 @@ def create_ds(session=None):
 
     ds_id = create_ds_list_blank_record(csv_file, ds_type, ds_extra)
 
-    ds_collection_name = 'ds_%s' % ds_id
-    _db().create_collection(ds_collection_name)
+    conn.create_collection(ds[ds_id])
     try:
-        add_ds(csv_file, ds_id, ds_collection_name)
+        add_ds(ds_id, csv_file)
     except Exception as e:
         update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
         # delete failed collection
-        _db()[ds_collection_name].drop(session=session)
+        conn.drop_collection(ds[ds_id])
         return error(e)
 
     process_ds(ds_id)
@@ -52,133 +53,70 @@ def create_ds(session=None):
 
 @app.route('/ls')
 def list_ds():
-    filter = {'status': 'active'}
+    q = query(ds_list).filter(document.status == 'active')
     _id = request.args.get('id')
     if (_id):
-        filter.update({'_id': ObjectId(_id)})
+        q.filter(document._id == ObjectId(_id))
 
-    cursor = _db()['ds_list'].find(filter)
-    return list_response(cursor)
+    return list_response(conn.execute(q))
 
 
 @app.route('/ds/<ds_id>')
 def get_ds(ds_id):
-    ds_collection_name = 'ds_%s' % ds_id
-    cursor = _db()[ds_collection_name].find()
-    return list_response(cursor)
+    return list_response(conn.execute(query(ds[ds_id])))
 
 
 @app.route('/ds/<ds_id>/visualize')
 def visualize_ds(ds_id):
+    # visualization pipeline (not to be confused with aggregation pipeline)
+    # pipeline ::= [item 1, ...]
+    # item ::= {col: <col name>, key: <path to value*>,
+    # [accumulator: <accumulator>]}
+    # * path to the value to be used in visualization.
+    # if an item does not contain accumulator, grouping by this item
+    # will be applied, otherwise the accumulator will be applied.
     pipeline_str = request.args['pipeline']
     pipeline = json.loads(pipeline_str)
 
-    classification_collection_name = 'ds_%s_classification' % ds_id
-    aggregation_pipeline = []
+    # build aggregation pipeline
+    p = aggregate(ds_classification[ds_id]) \
+        .match(document.col.in_(item['col'] for item in pipeline)) \
+        .group(document.row, col_details=push_(
+        dict_(col=document.col, details=document.details))) \
+        .project(**dict((item['col'], filter_(lambda x: x.col == item['col'],
+                                              document.col_details)[0]) for item
+                        in pipeline)) \
+        .project(**dict((item['col'],
+                         document.get_field(item['col']).details.get_field(
+                             item['key'])) for item in pipeline))
 
-    # stage #1. combine all cols details by row id
-    stage1 = {
-        '$group': {
-            '_id': '$row',
-            'colDet': {
-                '$push': {
-                    'col': '$col',
-                    'details': '$details'
-                }
-            }
-        }
-    }
-    aggregation_pipeline.append(stage1)
+    # only 0 / 1 group level one so far
+    if 'accumulator' not in pipeline[0]:
+        _id = getattr(document, pipeline[0]['col'])
+        accumulated_items = pipeline[1:]
+    else:
+        _id = None
+        accumulated_items = pipeline
+    if accumulated_items:
+        accumulators = dict((item['col'],
+                             get_accumulator(item['accumulator'],
+                                             document.get_field(item['col'])))
+                            for item in accumulated_items)
+    else:
+        # default accumulator
+        accumulators = dict(count=CountAccumulator())
 
-    # stage #2. extract cols which are used in the pipeline
-    # to the separate fields
-    stage2 = {
-        '$project': dict(
-            (item['col'], {
-                '$arrayElemAt': [
-                    {
-                        '$filter': {
-                            'input': '$colDet',
-                            'cond': {
-                                '$eq': ['$$this.col', item['col']]
-                            }
-                        },
-                    },
-                    0
-                ]
-            })
-            for item in pipeline
-        )
-    }
-    aggregation_pipeline.append(stage2)
+    p.group(_id, **dict(
+        (col_name, accumulator.get_accumulator()) for col_name, accumulator in
+        accumulators.items()))
 
-    # stage #3. get needed part of col details
-    stage3 = {
-        '$project': dict(
-            (item['col'], '$%s.details.%s' % (item['col'], item['key']))
-            for item in pipeline
-        )
-    }
-    aggregation_pipeline.append(stage3)
+    cursor = conn.execute(p)
+    result = list(cursor)
 
-    # stage #4. group and calculate values.
-    # we will consider pipeline items with `value` as
-    # scalar items (such as mean, median etc.) and items
-    # without this filed as group items, which will be nested
-    # one to another,
-    scalar_items = list(filter(lambda item: 'value' in item, pipeline))
-    group_items = list(filter(lambda item: 'value' not in item, pipeline))
+    for accumulator in accumulators.values():
+        accumulator.postprocess(result)
 
-    def get_group_id(items, in_id):
-        col_prefix = '$' + ('_id.' if in_id else '')
-        if len(items) > 1:
-            return dict(
-                (item['col'], col_prefix + item['col']) for item in items)
-        elif len(items) == 1:
-            return col_prefix + items[0]['col']
-        return None
-
-    def get_aggregation_operation(item):
-        # this applies something like '$avg'
-        return {
-            item['value']: '$%s' % item['col']
-        }
-
-    aggregation_expr = dict(
-        (item['col'], get_aggregation_operation(item))
-        for item in scalar_items) or dict(count={'$sum': 1})
-    transition_expr = dict((key, '$%s' % key)
-                           for key in aggregation_expr.keys())
-
-    stage4 = {
-        '$group': {**{
-            '_id': get_group_id(group_items, in_id=False)
-        }, **aggregation_expr}
-    }
-    aggregation_pipeline.append(stage4)
-    while len(group_items) > 1:
-        item = group_items.pop()
-        stage4 = {
-            '$group': {
-                '_id': get_group_id(group_items, in_id=True),
-                'list': {
-                    '$push': {
-                        **{
-                            item['col']: '$_id.%s' % item['col']
-                        },
-                        **transition_expr
-                    }
-                }
-            }
-        }
-        aggregation_pipeline.append(stage4)
-        transition_expr = dict(list='$list')
-
-    app.logger.debug('db.%s.aggregate( %s )' %
-                     (classification_collection_name, aggregation_pipeline))
-    cursor = _db()[classification_collection_name].aggregate(
-        aggregation_pipeline)
-    return list_response(cursor)
+    return list_response(result)
 
 
 @app.route('/ds/<ds_id>/filter')
@@ -190,143 +128,75 @@ def filter_ds(ds_id):
     if not query:
         return get_ds(ds_id)
 
-    collection_name = 'ds_%s' % ds_id
-    classification_collection_name = 'ds_%s_classification' % ds_id
+    p = aggregate(ds_classification[ds_id]) \
+        .match(and_(document.col == query[0]['col'],
+                    document.details.get_field(query[0]['key']).if_null(
+                        None).in_(query[0]['values']))) \
+        .project(document.row)
 
-    aggregation_pipeline = []
-    aggregation_pipeline.append({
-        '$match': {
-            '$expr': {
-                '$and': [{
-                    '$eq': ['$col', query[0]['col']]
-                }, {
-                    '$in': [
-                        '$details.%s' % query[0]['key'],
-                        query[0]['values']
-                    ]
-                }]
-            }
-        }
-    })
-    aggregation_pipeline.append({
-        '$project': {
-            'row': 1
-        }
-    })
+    # match rest of the columns
     for item in query[1:]:
-        aggregation_pipeline.append({
-            '$lookup': {
-                'from': classification_collection_name,
-                'localField': 'row',
-                'foreignField': 'row',
-                'as': item['col']
-            }
-        })
-        aggregation_pipeline.append({
-            '$project': {
-                'row': 1,
-                item['col']: {
-                    '$arrayElemAt': [
-                        {
-                            '$filter': {
-                                'input': '$%s' % item['col'],
-                                'cond': {
-                                    '$eq': ['$$this.col', item['col']]
-                                }
-                            }
-                        },
-                        0
-                    ]
-                }
-            }
-        })
-        aggregation_pipeline.append({
-            '$match': {
-                '$expr': {
-                    '$in': {
-                        '$%s.details.%s' % (item['col'], item['key']),
-                        item['values']
-                    }
-                }
-            }
-        })
-        aggregation_pipeline.append({
-            '$project': {
-                'row': 1
-            }
-        })
-    aggregation_pipeline.append({
-        '$lookup': {
-            'from': collection_name,
-            'localField': 'row',
-            'foreignField': '_id',
-            'as': 'rowData'
-        }
-    })
-    aggregation_pipeline.append({
-        '$replaceRoot': {
-            'newRoot': {
-                '$arrayElemAt': ['$rowData', 0]
-            }
-        }
-    })
+        p.lookup(ds_classification[ds_id], local_field='row',
+                 foreign_field='row', as_=item['col']) \
+            .project(document.row, **{item['col']: filter_(
+            lambda x: x.col == item['col'], document.get_field(item['col']))[
+            0]}) \
+            .match(
+            document.get_field(item['col']).details.get_field(
+                item['key']).if_null(None).in_(item['values'])) \
+            .project(document.row)
 
-    app.logger.debug('db.%s.aggregate( %s )' %
-                     (classification_collection_name, aggregation_pipeline))
-    cursor = _db()[classification_collection_name].aggregate(
-        aggregation_pipeline)
-    return list_response(cursor)
+    # match rows for the row id's
+    p.lookup(ds[ds_id], local_field='row', foreign_field='_id', as_='row_data') \
+        .replace_root(document.row_data[0])
+
+    return list_response(conn.execute(p))
 
 
-@transactional
-def add_ds(csv_file, ds_id, ds_collection_name, session=None):
+@conn.transactional
+def add_ds(ds_id, csv_file):
     old_record = get_ds_list_active_record(csv_file.filename)
-    ds = _db()[ds_collection_name]
     stream = io.StringIO(csv_file.stream.read().decode('UTF8'), newline=None)
     csv_reader = csv.DictReader(stream)
     csv_rows = [csv_row for csv_row in csv_reader]
     app.logger.debug(csv_rows)
-    ds.insert_many(csv_rows, session=session)
+    conn.execute(insert_many(ds[ds_id], csv_rows))
 
     # update old collection status to "old"
     # and new collection status to "active"
     if old_record:
-        update_ds_list_record(old_record['_id'], {'status': 'old'},
-                              session=session)
+        update_ds_list_record(old_record['_id'], {'status': 'old'})
     update_ds_list_record(ds_id,
-                          {'status': 'active', 'cols': csv_reader.fieldnames},
-                          session=session)
+                          {'status': 'active', 'cols': csv_reader.fieldnames})
 
 
 def process_ds(ds_id):
     def on_classify_done(future: Future):
-        call_get_details_for_all_cols(ds_id)
+        if not future.exception():
+            call_get_details_for_all_cols(ds_id)
 
     call_classify_cells(ds_id, PatternClassifier()) \
         .add_done_callback(on_classify_done)
 
 
-def update_ds_list_record(ds_id: Union[str, ObjectId], d: dict, session=None):
-    _db()['ds_list'].update_one({'_id': ObjectId(ds_id)}, {
-        '$set': d
-    }, session=session)
+def update_ds_list_record(ds_id: Union[str, ObjectId], d: dict):
+    conn.execute(update_one(ds_list) \
+                 .filter(document._id == ObjectId(ds_id)) \
+                 .set(d))
 
 
-def create_ds_list_blank_record(csv_file, type, extra, session=None):
-    ds_list = _db()['ds_list']
-    name = csv_file.filename
-    ds_id = ds_list.insert_one({
-        'name': name,
+def create_ds_list_blank_record(csv_file, type, extra):
+    return conn.execute(insert_one(ds_list, {
+        'name': csv_file.filename,
         'type': type,
         'status': 'blank',
         'extra': extra
-    }, session=session).inserted_id
-    return ds_id
+    })).inserted_id
 
 
 def get_ds_list_active_record(name):
-    ds_list = _db()['ds_list']
-    return ds_list.find_one({'name': name, 'status': 'active'})
+    return conn.execute(query_one(ds_list).filter(
+        and_(ds_list.name == name, ds_list.status == 'active')))
 
 
 @app.errorhandler(Exception)
@@ -339,7 +209,7 @@ def error(e):
     return {'error': str(e)}, 500
 
 
-def list_response(cursor: Cursor):
+def list_response(cursor: Iterable):
     return {
         'list': [serialize(record) for record in cursor],
         'success': True

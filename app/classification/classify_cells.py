@@ -1,18 +1,20 @@
 import datetime
 import multiprocessing
 import os
+import traceback
 from concurrent.futures._base import Future
-from typing import Union, Tuple, Dict, Optional, Any
+from typing import Union, Optional, Any
 
-from bson import ObjectId
-
-from app import _db, _set
+from app import app
 from async_loop import call_async
+from bson import ObjectId
 from classification.abstract_classifier import AbstractClassifier
+from db import conn, ds_classification, ds, ds_list, cl_stat
+from helper import process_queue
+from mongomoron import index, query, insert_many, update, insert_one, aggregate, \
+    avg
 
 # settings
-from helper import process_queue
-
 MAX_PROCESS_COUNT = os.cpu_count()
 CHUNK_SIZE = 100
 
@@ -27,13 +29,9 @@ def classify_cells(ds_id: Union[str, ObjectId],
     :return:
     """
 
-    collection_name = 'ds_%s' % ds_id
-    result_collection_name = 'ds_%s_classification' % ds_id
-    if _collection_exists(result_collection_name):
-        _db()[result_collection_name].drop()
-    _db().create_collection(result_collection_name)
-    _db()[result_collection_name].create_index('row')
-    _db()[result_collection_name].create_index('col')
+    conn.create_collection(ds_classification[ds_id])
+    conn.create_index(index(ds_classification[ds_id]).asc('row'))
+    conn.create_index(index(ds_classification[ds_id]).asc('col'))
 
     # task is a tuple cell, value, where
     # cell is a dict (row=row, col=col);
@@ -43,7 +41,7 @@ def classify_cells(ds_id: Union[str, ObjectId],
     output_queue = multiprocessing.Queue()
     output_count = 0
     for task in (({'row': record['_id'], 'col': col}, value)
-                 for record in _db()[collection_name].find()
+                 for record in conn.execute(query(ds[ds_id]))
                  for col, value in record.items()
                  if col != '_id' and value):
         input_queue.put(task)
@@ -58,7 +56,8 @@ def classify_cells(ds_id: Union[str, ObjectId],
 
     for x in range(MAX_PROCESS_COUNT):
         p = multiprocessing.Process(target=_execute_task,
-                                    args=(classifier, input_queue, output_queue))
+                                    args=(
+                                        classifier, input_queue, output_queue))
         p.start()
 
     cells = []
@@ -68,12 +67,11 @@ def classify_cells(ds_id: Union[str, ObjectId],
         cells.append(cell)
 
         if len(cells) >= CHUNK_SIZE:
-            _db()[result_collection_name]\
-                .insert_many(cells)
+            conn.execute(insert_many(ds_classification[ds_id], cells))
             cells.clear()
 
     if cells:
-        _db()[result_collection_name].insert_many(cells)
+        conn.execute(insert_many(ds_classification[ds_id], cells))
 
     _update_ds_list_record(ds_id, {
         'status': 'finished'
@@ -90,7 +88,16 @@ def call_classify_cells(ds_id: Union[str, ObjectId],
     :param classifier: Classifier
     :return:
     """
-    return call_async(classify_cells, ds_id, classifier)
+
+    def _handle_async_exception(f: Future):
+        e = f.exception()
+        if e:
+            app.logger.error(traceback.format_exc())
+            _update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
+
+    f = call_async(classify_cells, ds_id, classifier)
+    f.add_done_callback(_handle_async_exception)
+    return f
 
 
 def _execute_task(classifier: AbstractClassifier,
@@ -101,59 +108,38 @@ def _execute_task(classifier: AbstractClassifier,
         output_queue.put(cell)
 
 
-def _collection_exists(collection_name):
-    return collection_name in _db().list_collection_names()
-
-
 def _update_ds_list_record(ds_id: Union[str, ObjectId],
                            classification: dict):
-    _db()['ds_list'].update({'_id': ObjectId(ds_id)},
-                            _set({'classification': classification}))
+    conn.execute(
+        update(ds_list) \
+            .filter(ds_list._id == ObjectId(ds_id))
+            .set({'classification': classification})
+    )
 
 
 def _create_cl_stat_record(count: int) -> ObjectId:
-    return _db()['cl_stat'].insert_one({
-        'count': count,
-        'started': datetime.datetime.now()
-    }).inserted_id
+    return conn.execute(
+        insert_one(cl_stat, {
+            'count': count,
+            'started': datetime.datetime.now()
+        })
+    ).inserted_id
 
 
 def _update_cl_stat_record(cl_stat_id: ObjectId):
-    _db()['cl_stat'].update({'_id': cl_stat_id},
-                            _set({'finished': datetime.datetime.now()}))
+    return conn.execute(
+        update(cl_stat) \
+            .filter(cl_stat._id == cl_stat_id)
+            .set({'finished': datetime.datetime.now()})
+    )
 
 
 def _get_estimated_duration(count: int) -> Optional[Any]:
-    cursor = _db()['cl_stat'].aggregate([
-        {
-            "$match": {
-                "finished": {"$ne": None}
-            }
-        },
-        {
-            "$addFields": {
-                "duration": {
-                    "$subtract": ["$finished", "$started"]
-                }
-            }
-        },
-        {
-            "$addFields": {
-                "oneDuration": {
-                    "$divide": ["$duration", "$count"]
-                }
-            }
-        },
-        {
-            "$group": {
-                "_id": None,
-                "avgOneDuration": {
-                    "$avg": "$oneDuration"
-                }
-            }
-        }]
-    )
-    if cursor:
-        for record in cursor:
-            return record['avgOneDuration'] * count
+    p = aggregate(cl_stat) \
+        .match(cl_stat.finished != None) \
+        .add_fields(duration=cl_stat.finished - cl_stat.started) \
+        .add_fields(duration_one=cl_stat.duration / cl_stat.count) \
+        .group(None, avg_duration=avg(cl_stat.duration_one))
+    for result in conn.execute(p):
+        return result['avg_duration'] * count
     return None

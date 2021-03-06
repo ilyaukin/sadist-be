@@ -5,8 +5,9 @@ from unittest import TestCase, mock
 import mongomock
 import pymongo
 import pytest
-
-from app import app, _db
+from app import app
+from db import ds, ds_classification, conn
+from mongomoron import delete, insert_many
 
 if os.getenv('USE_MONGOMOCK'):
     DB_PATCH = mongomock.patch(
@@ -24,92 +25,105 @@ else:
 
 
 def prepare_dataset():
-    ds_collection_name = 'ds_1111'
-    ds_classification_collection_name = 'ds_1111_classification'
+    ds_collection = ds['1111']
+    ds_classification_collection = ds_classification['1111']
 
-    ds_collection = _db()[ds_collection_name]
-    ds_classification_collection = _db()[ds_classification_collection_name]
+    conn.execute(
+        delete(ds_collection)
+    )
+    conn.execute(
+        insert_many(
+            ds_collection,
+            [
+                {
+                    '_id': 1,
+                    'Location': 'Moscow',
+                    'Comment': '1111'
+                },
+                {
+                    '_id': 2,
+                    'Location': 'Paris',
+                    'Comment': '2222'
+                },
+                {
+                    '_id': 3,
+                    'Location': 'MOscow',
+                    'Comment': '2344'
+                },
+                {
+                    '_id': 4,
+                    'Location': 'NYC',
+                    'Comment': '4444'
+                },
+                {
+                    '_id': 5,
+                    'Location': '???',
+                    'Comment': '9999'
+                }
+            ]
+        )
+    )
 
-    ds_collection.delete_many({})
-    ds_collection.insert_many([
-        {
-            '_id': 1,
-            'Location': 'Moscow',
-            'Comment': '1111'
-        },
-        {
-            '_id': 2,
-            'Location': 'Paris',
-            'Comment': '2222'
-        },
-        {
-            '_id': 3,
-            'Location': 'MOscow',
-            'Comment': '2344'
-        },
-        {
-            '_id': 4,
-            'Location': 'NYC',
-            'Comment': '4444'
-        },
-        {
-            '_id': 5,
-            'Location': '???',
-            'Comment': '9999'
-        }
-    ])
-    ds_classification_collection.delete_many({})
-    ds_classification_collection.insert_many([
-        {
-            '_id': 1,
-            'col': 'Location',
-            'row': 1,
-            'details': {
-                'city': {
-                    'name': 'Moscow',
-                    'coordinates': [37.61556, 55.75222]
+    conn.execute(
+        delete(ds_classification_collection)
+    )
+    conn.execute(
+        insert_many(
+            ds_classification_collection,
+
+            [
+                {
+                    '_id': 1,
+                    'col': 'Location',
+                    'row': 1,
+                    'details': {
+                        'city': {
+                            'name': 'Moscow',
+                            'coordinates': [37.61556, 55.75222]
+                        }
+                    }
+                },
+                {
+                    '_id': 2,
+                    'col': 'Location',
+                    'row': 2,
+                    'details': {
+                        'city': {
+                            'name': 'Paris',
+                            'coordinates': [2.3488, 48.85341]
+                        }
+                    }
+                },
+                {
+                    '_id': 3,
+                    'col': 'Location',
+                    'row': 3,
+                    'details': {
+                        'city': {
+                            'name': 'Moscow',
+                            'coordinates': [37.61556, 55.75222]
+                        }
+                    }
+                },
+                {
+                    '_id': 4,
+                    'col': 'Location',
+                    'row': 4,
+                    'details': {
+                        'city': {
+                            'name': 'New York',
+                            'coordinates': [-74.00597, 40.71427]
+                        }
+                    }
+                },
+                {
+                    '_id': 5,
+                    'col': 'Location',
+                    'row': 5
                 }
-            }
-        },
-        {
-            '_id': 2,
-            'col': 'Location',
-            'row': 2,
-            'details': {
-                'city': {
-                    'name': 'Paris',
-                    'coordinates': [2.3488, 48.85341]
-                }
-            }
-        },
-        {
-            '_id': 3,
-            'col': 'Location',
-            'row': 3,
-            'details': {
-                'city': {
-                    'name': 'Moscow',
-                    'coordinates': [37.61556, 55.75222]
-                }
-            }
-        },
-        {
-            '_id': 4,
-            'col': 'Location',
-            'row': 4,
-            'details': {
-                'city': {
-                    'name': 'New York',
-                    'coordinates': [-74.00597, 40.71427]
-                }
-            }
-        },
-        {
-            '_id': 5,
-            'col': 'Location',
-            'row': 5
-        }
-    ])
+            ]
+        )
+    )
 
 
 @pytest.fixture
@@ -201,7 +215,7 @@ def test_filter_uncategorized(client):
 
     expected_list = [
         {
-            '_id': 5,
+            'id': 5,
             'Location': '???',
             'Comment': '9999'
         },
