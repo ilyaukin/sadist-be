@@ -1,21 +1,18 @@
 import datetime
-import multiprocessing
-import os
 import traceback
 from concurrent.futures._base import Future
-from typing import Union, Optional, Any
+from typing import Union, Optional, Any, Tuple
 
 from app import app
 from async_loop import call_async
+from async_processing import process_in_parallel
 from bson import ObjectId
 from classification.abstract_classifier import AbstractClassifier
 from db import conn, ds_classification, ds, ds_list, cl_stat
-from helper import process_queue
 from mongomoron import index, query, insert_many, update, insert_one, aggregate, \
     avg
 
 # settings
-MAX_PROCESS_COUNT = os.cpu_count()
 CHUNK_SIZE = 100
 
 
@@ -36,34 +33,21 @@ def classify_cells(ds_id: Union[str, ObjectId],
     # task is a tuple cell, value, where
     # cell is a dict (row=row, col=col);
     # result is cell with added label
-    input_queue = multiprocessing.Queue()
-    input_count = 0
-    output_queue = multiprocessing.Queue()
-    output_count = 0
-    for task in (({'row': record['_id'], 'col': col}, value)
-                 for record in conn.execute(query(ds[ds_id]))
-                 for col, value in record.items()
-                 if col != '_id' and value):
-        input_queue.put(task)
-        input_count += 1
+    tasks = [({'row': record['_id'], 'col': col}, value) for record in
+             conn.execute(query(ds[ds_id])) for col, value in record.items() if
+             col != '_id' and value]
 
     _update_ds_list_record(ds_id, {
         'status': 'in progress',
         'started': datetime.datetime.now(),
-        'estimated': _get_estimated_duration(count=input_count)
+        'estimated': _get_estimated_duration(count=len(tasks))
     })
-    cl_stat_id = _create_cl_stat_record(count=input_count)
 
-    for x in range(MAX_PROCESS_COUNT):
-        p = multiprocessing.Process(target=_execute_task,
-                                    args=(
-                                        classifier, input_queue, output_queue))
-        p.start()
-
+    cl_stat_id = _create_cl_stat_record(count=len(tasks))
     cells = []
-    while output_count < input_count:
-        cell = output_queue.get()
-        output_count += 1
+    for cell in process_in_parallel(tasks, processor=_execute_task,
+                                    args=(classifier,),
+                                    timeout=120):
         cells.append(cell)
 
         if len(cells) >= CHUNK_SIZE:
@@ -100,12 +84,10 @@ def call_classify_cells(ds_id: Union[str, ObjectId],
     return f
 
 
-def _execute_task(classifier: AbstractClassifier,
-                  input_queue: multiprocessing.Queue,
-                  output_queue: multiprocessing.Queue):
-    for cell, value in process_queue(input_queue):
-        cell.update({'label': classifier.classify(value)})
-        output_queue.put(cell)
+def _execute_task(task: Tuple, classifier: AbstractClassifier):
+    cell, value = task
+    cell.update({'label': classifier.classify(value)})
+    return cell
 
 
 def _update_ds_list_record(ds_id: Union[str, ObjectId],

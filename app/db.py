@@ -15,13 +15,15 @@ class SadistDatabaseConnection(DatabaseConnection):
 
     def mongo_client(self):
         pid = os.getpid()
-        self.mongo_client_pool.setdefault(pid,
-                                          pymongo.MongoClient(
-                                              SadistDatabaseConnection.DATABASE_URL))
+        if pid not in self.mongo_client_pool:
+            self.mongo_client_pool[pid] = self._new_client()
         return self.mongo_client_pool[pid]
 
     def db(self) -> Database:
         return self.mongo_client().get_database()
+
+    def _new_client(self) -> pymongo.MongoClient:
+        return pymongo.MongoClient(SadistDatabaseConnection.DATABASE_URL, socketTimeoutMS=30000)
 
 
 conn = SadistDatabaseConnection()

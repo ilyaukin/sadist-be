@@ -1,18 +1,16 @@
 import inspect
-import multiprocessing
-import os
 import traceback
 from concurrent.futures._base import Future
-from typing import Union, Type, Iterable
+from typing import Union, Type, Iterable, Tuple
 
 import detailization
 from app import app
 from async_loop import call_async
+from async_processing import process_in_parallel
 from bson import ObjectId
 from db import conn, ds_classification, ds, ds_list
 from detailization.abstract_detailizer import AbstractDetailizer
-from helper import process_queue
-from mongomoron import query, query_one, update, aggregate, dict_, document, \
+from mongomoron import update, aggregate, dict_, document, \
     sum_, push_
 
 DETAILIZER_CLASSES = [t[1] for t in inspect.getmembers(detailization,
@@ -21,43 +19,25 @@ DETAILIZER_CLASSES = [t[1] for t in inspect.getmembers(detailization,
                                                            m) and issubclass(m,
                                                                              AbstractDetailizer))]
 
-MAX_PROCESS_COUNT = os.cpu_count()
-
 
 def get_details_for_cells(ds_id: Union[str, ObjectId],
                           col: str,
                           detaililzer: AbstractDetailizer):
-    input_queue = multiprocessing.Queue()
-    input_count = 0
-    output_queue = multiprocessing.Queue()
-    output_count = 0
-
-    for cell in conn.execute(
-            query(ds_classification[ds_id])
-                    .filter(document.col == col)
-    ):
-        input_queue.put(
-            (
-                cell['_id'],
-                conn.execute(
-                    query_one(ds[ds_id]) \
-                        .filter(document._id == cell['row'])
-                )[col]
-            )
-        )
-        input_count += 1
+    input = ((cell['_id'], cell['value']) \
+             for cell in conn.execute(
+        aggregate(ds_classification[ds_id]) \
+            .match(document.col == col)
+            .lookup(ds[ds_id], local_field='row',
+                    foreign_field='_id',
+                    as_='row_data') \
+            .project(row_data=document.row_data[0]) \
+            .project(value=document.row_data.get_field(col))
+    ))
 
     _update_ds_list_record(ds_id, col, {'status': 'in progress'})
 
-    for x in range(MAX_PROCESS_COUNT):
-        p = multiprocessing.Process(target=_execute_task,
-                                    args=(
-                                        detaililzer, input_queue, output_queue))
-        p.start()
-
-    while output_count < input_count:
-        _id, details = output_queue.get()
-        output_count += 1
+    for _id, details in process_in_parallel(input, processor=_execute_task,
+                                            args=(detaililzer,), timeout=120):
         if details:
             conn.execute(
                 update(ds_classification[ds_id]) \
@@ -110,12 +90,9 @@ def call_get_details_for_all_cols(ds_id: Union[str, ObjectId]) -> Iterable[
     return ff
 
 
-def _execute_task(detailizer: AbstractDetailizer,
-                  input_queue: multiprocessing.Queue,
-                  output_queue: multiprocessing.Queue):
-    for _id, value in process_queue(input_queue):
-        details = detailizer.get_details(value)
-        output_queue.put((_id, details))
+def _execute_task(task: Tuple, detailizer: AbstractDetailizer):
+    _id, value = task
+    return _id, detailizer.get_details(value)
 
 
 def _update_ds_list_record(ds_id: Union[str, ObjectId],
