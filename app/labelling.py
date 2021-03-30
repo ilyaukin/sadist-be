@@ -1,4 +1,5 @@
 import json
+from typing import Callable
 
 from app import app
 import random
@@ -23,16 +24,19 @@ class LabellingInterface(object):
         self._collection = collection
 
     def routes(self):
-        return \
-            app.route(self._prefix + '/session')(self.session), \
-            app.route(self._prefix + '/session/<session_id>', methods=['GET'])(
-                self.next_sample), \
-            app.route(self._prefix + '/session/<session_id>',
-                      methods=['POST'])(self.label_sample), \
-            app.route(self._prefix + '/session/<session_id>/merge',
-                      methods=['POST'])(self.merge), \
-            app.route(self._prefix + '/session/<session_id>/resolve-conflicts',
-                      methods=['POST'])(self.resolve_conflicts)
+        def _route(rule: str, func: Callable, **options):
+            app.add_url_rule(self._prefix + rule,
+                             self._type + '.' + func.__name__,
+                             func,
+                             **options)
+
+        _route('/session', self.session)
+        _route('/session/<session_id>', self.next_sample, methods=['GET'])
+        _route('/session/<session_id>', self.label_sample, methods=['POST'])
+        _route('/session/<session_id>/merge', self.merge, methods=['POST'])
+        _route('/session/<session_id>/resolve-conflicts',
+               self.resolve_conflicts,
+               methods=['POST'])
 
     def session(self):
         session_id = request.args.get('session_id', None)
@@ -91,7 +95,8 @@ class LabellingInterface(object):
         return render_template('labelling.html',
                                fe_root=url_for('static',
                                                filename='labelling.js'),
-                               data={'sessionId': session_id,
+                               data={'type': self._type, 'prefix': self._prefix,
+                                     'sessionId': session_id,
                                      'labels': self.labels()})
 
     def next_sample(self, session_id):
@@ -276,9 +281,10 @@ class GeoLabellingInterface(LabellingInterface):
         return [{'value': 'null,null', 'text': '-'}] \
                + [{'value': 'null,%s' % _id, 'text': name} for _id, name in
                   countries.items()] \
-               + [{'value': '%s,%s' % (city['_id'], city['county_code']),
+               + [{'value': '%s,%s' % (city['_id'], city['country_code']),
                    'text': '%s, %s' % (
-                       city['name'], countries[city['county_code']])} for city in
+                       city['name'], countries[city['country_code']])} for city
+                  in
                   conn.execute(query(geo_city))]
 
     def _btof(self, label: dict):
