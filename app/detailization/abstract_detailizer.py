@@ -11,6 +11,14 @@ class AbstractDetailizer(object):
     threshold = 2/3
     labels = []
 
+    def learn(self, **kwargs):
+        """
+        Learn by sample data, source of data is defined by
+        particular classifiers.
+        :param kwargs: Defined by particular classifier
+        """
+        raise NotImplemented()
+
     def get_details(self, value: str) -> Dict[str, object]:
         """
         Get details for the value of certain class(es).

@@ -53,3 +53,5 @@ dl_session = CollectionFamily('dl_session_%s')
 dl_session_list = Collection('dl_session')
 dl_master = Collection('dl_master')
 dl_geo = Collection('dl_geo')
+
+nn_model = Collection('nn_model')
