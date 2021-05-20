@@ -17,6 +17,7 @@ def serialize_city(city: dict, add_country: bool = False) -> dict:
     """
     result = {
         'city': {
+            'id': city['_id'],
             'name': city['name'],
             'coordinates': city['loc']['coordinates']
         }
@@ -34,6 +35,7 @@ def serialize_country(country: dict) -> dict:
     """
     return {
         'country': {
+            'id': country['_id'],
             'name': country['name'],
             'coordinates': country['loc']['coordinates']
         }
