@@ -1,4 +1,8 @@
 version: '3'
+networks:
+  backend-network:
+  simplisticblogger_backend-network:
+    external: true
 services:
 
   flask:
@@ -8,6 +12,8 @@ services:
       dockerfile: Dockerfile-flask
     environment:
       - DATABASE_URL
+    networks:
+      - backend-network
 
   nginx:
     image: webapp-nginx
@@ -16,6 +22,7 @@ services:
       dockerfile: Dockerfile-nginx
     ports:
       - 80:80
-    depends_on:
-      - flask
+    networks:
+      - backend-network
+      - simplisticblogger_backend-network
 
