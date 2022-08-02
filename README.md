@@ -19,7 +19,7 @@
     mkdir static
     ```
     - In sadist-fe directory, which is supposed to be
-    at the same level as sadist-be, run `npm run build`
+    at the same level as sadist-be, run `npm run build-n-copy`
 
 - Install app package locally
 ```
