@@ -55,3 +55,6 @@ dl_master = Collection('dl_master')
 dl_geo = Collection('dl_geo')
 
 nn_model = Collection('nn_model')
+
+app_user = Collection('app_user')
+app_user_session = Collection('app_user_session')
