@@ -1,0 +1,14 @@
+version: '3'
+networks:
+  backend-network:
+services:
+
+  flask:
+    networks:
+      - backend-network
+
+  nginx:
+    ports:
+      - 80:80
+    networks:
+      - backend-network

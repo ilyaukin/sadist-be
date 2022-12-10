@@ -1,0 +1,18 @@
+version: '3'
+networks:
+  backend-network:
+  simplisticblogger_backend-network:
+    external: true
+services:
+
+  flask:
+    networks:
+      - backend-network
+
+  nginx:
+    ports:
+      - 80:80
+    networks:
+      - backend-network
+      - simplisticblogger_backend-network
+
