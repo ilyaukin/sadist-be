@@ -1,0 +1,17 @@
+version: '3'
+networks:
+  backend-network-staging:
+services:
+
+  flask:
+    image: webapp-flask-staging
+    networks:
+      - backend-network-staging
+
+  nginx:
+    image: webapp-nginx-staging
+    ports:
+      - 8080:80
+    networks:
+      - backend-network-staging
+
