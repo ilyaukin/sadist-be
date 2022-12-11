@@ -12,11 +12,6 @@ on:
 jobs:
   # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
-    steps:
     # Trigger sadist-ci's reusable workflow
-    - uses: ilyaukin/sadist-ci/.github/workflows/ci-develop.yml@develop
-      secrets: inherit
+    uses: ilyaukin/sadist-ci/.github/workflows/ci-develop.yml@develop
+    secrets: inherit
