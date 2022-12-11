@@ -17,12 +17,6 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-    # Trigger sadist-ci build
-    - uses: informaticsmatters/trigger-ci-action@v1
-      with:
-        ci-owner: ilyaikin
-        ci-repository: sadist-ci
-        ci-ref: refs/heads/develop
-        ci-user: ilyaukin
-        ci-user-token: ${{ secrets.ACCESS_TOKEN }}
-        ci-name: Check-in develop
+    # Trigger sadist-ci's reusable workflow
+    - uses: ilyaukin/sadist-ci/.github/workflows/ci-develop.yml@develop
+      secrets: inherit
