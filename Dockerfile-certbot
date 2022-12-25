@@ -1,0 +1,6 @@
+FROM certbot/certbot:latest
+
+RUN echo "0 21 * * * certbot renew > /proc/1/fd/1 2> /proc/1/fd/2" | crontab -
+
+ENTRYPOINT []
+CMD ["crond", "-f"]

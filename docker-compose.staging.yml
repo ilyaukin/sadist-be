@@ -12,6 +12,7 @@ services:
     image: webapp-nginx-staging
     ports:
       - 8080:80
+      - 8043:443
     networks:
       - backend-network-staging
 
