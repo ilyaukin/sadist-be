@@ -16,6 +16,19 @@ services:
     networks:
       - backend-network
       - simplisticblogger_backend-network
-    depends_on:
-      - flask
+    volumes:
+      - certbot_www:/var/www/certbot/
+      - ssl_certs:/etc/letsencrypt/
+
+  certbot:
+    image: certbot
+    build:
+      context: .
+      dockerfile: Dockerfile-certbot
+    volumes:
+      - certbot_www:/var/www/certbot/
+      - ssl_certs:/etc/letsencrypt/
+volumes:
+  certbot_www:
+  ssl_certs:
 

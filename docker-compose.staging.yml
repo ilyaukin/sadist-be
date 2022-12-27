@@ -15,4 +15,13 @@ services:
       - 8043:443
     networks:
       - backend-network-staging
+    volumes:
+      - build_certbot_www:/var/www/certbot/
+      - build_ssl_certs:/etc/letsencrypt/
+
+volumes:
+  build_certbot_www:
+    external: true
+  build_ssl_certs:
+    external: true
 
