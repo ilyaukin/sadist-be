@@ -5,28 +5,39 @@ from unittest import TestCase, mock
 import mongomock
 import pymongo
 import pytest
+from bson import ObjectId
+from mongomoron import delete, insert_many, insert_one
+
 from app import app
-from db import ds, ds_classification, conn
-from mongomoron import delete, insert_many
+from db import conn, ds, ds_classification, ds_list
 
+test_database_url = 'mongodb://localhost:27017,127.0.0.1:27018/test_sadist_be?replicaSet=rs0'
 if os.getenv('USE_MONGOMOCK'):
-    DB_PATCH = mongomock.patch(
-        servers=(('localhost', 27017), ('localhost', 27018)))
+    test_client = mongomock.MongoClient(test_database_url)
 else:
-    test_client = pymongo.MongoClient(
-        'mongodb://localhost:27017,127.0.0.1:27018/test_sadist_be?replicaSet=rs0')
+    test_client = pymongo.MongoClient(test_database_url)
+Patch = mock.patch.object(conn, 'mongo_client', lambda: test_client)
 
 
-    def _get_test_client(*args, **kwargs):
-        return test_client
+@pytest.fixture
+@Patch
+def dataset1():
+    ds_id = ObjectId()
+    ds_collection = ds[str(ds_id)]
+    ds_classification_collection = ds_classification[str(ds_id)]
 
-
-    DB_PATCH = mock.patch('pymongo.MongoClient', _get_test_client)
-
-
-def prepare_dataset():
-    ds_collection = ds['1111']
-    ds_classification_collection = ds_classification['1111']
+    conn.execute(
+        delete(ds_list)
+    )
+    conn.execute(
+        insert_one(ds_list, {
+            '_id': ds_id,
+            'name': '1111.csv',
+            'extra': {
+                'access': {'type': 'public'}
+            }
+        })
+    )
 
     conn.execute(
         delete(ds_collection)
@@ -125,18 +136,20 @@ def prepare_dataset():
         )
     )
 
+    return {
+        'ds_id': ds_id,
+    }
+
 
 @pytest.fixture
 def client():
     return app.test_client()
 
 
-@DB_PATCH
-def test_visualize(client):
-    prepare_dataset()
-
+@Patch
+def test_visualize(client, dataset1):
     result = client \
-        .get('/ds/1111/visualize',
+        .get('/ds/%s/visualize' % dataset1['ds_id'],
              query_string='pipeline=' + json.dumps(
                  [{'col': 'Location', 'key': 'city'}])) \
         .get_json()
@@ -172,12 +185,10 @@ def test_visualize(client):
     TestCase().assertCountEqual(expected_list, result["list"])
 
 
-@DB_PATCH
-def test_filter(client):
-    prepare_dataset()
-
+@Patch
+def test_filter(client, dataset1):
     result = client \
-        .get('/ds/1111/filter',
+        .get('/ds/%s/filter' % dataset1['ds_id'],
              query_string='query=' + json.dumps(
                  [{'col': 'Location', 'key': 'city.name',
                    'values': ['Moscow']}])) \
@@ -200,12 +211,10 @@ def test_filter(client):
     TestCase().assertCountEqual(expected_list, result['list'])
 
 
-@DB_PATCH
-def test_filter_uncategorized(client):
-    prepare_dataset()
-
+@Patch
+def test_filter_uncategorized(client, dataset1):
     result = client \
-        .get('/ds/1111/filter',
+        .get('/ds/%s/filter' % dataset1['ds_id'],
              query_string='query=' + json.dumps(
                  [{'col': 'Location', 'key': 'city.name',
                    'values': [None]}])) \

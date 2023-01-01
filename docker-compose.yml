@@ -8,6 +8,7 @@ services:
       dockerfile: Dockerfile-flask
     environment:
       - DATABASE_URL
+      - FLASK_SECRET_KEY
 
   nginx:
     image: webapp-nginx

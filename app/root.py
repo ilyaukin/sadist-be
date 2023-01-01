@@ -5,6 +5,8 @@ import traceback
 from concurrent.futures._base import Future
 from typing import Union, Iterable
 
+from mongomoron.mongomoron import Expression
+
 from accumulator import get_accumulator, CountAccumulator
 from app import app
 from bson import ObjectId
@@ -12,9 +14,11 @@ from classification import PatternClassifier, \
     call_classify_cells
 from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
-from flask import render_template, url_for, request
+from flask import render_template, url_for, request, session
 from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
-    filter_, and_, update_one, insert_one, query_one
+    filter_, and_, update_one, insert_one, query_one, or_
+
+from serializer import serialize
 
 
 @app.route('/')
@@ -27,10 +31,8 @@ def root():
 def create_ds():
     csv_file = request.files['csv']
     ds_type = request.form['type']
-    ds_extra_string = request.form['extra']
-    ds_extra = None
-    if (ds_extra_string):
-        ds_extra = json.loads(ds_extra_string)
+    ds_extra_string = request.form.get('extra', '{}')
+    ds_extra = json.loads(ds_extra_string)
 
     ds_id = create_ds_list_blank_record(csv_file, ds_type, ds_extra)
 
@@ -53,7 +55,7 @@ def create_ds():
 
 @app.route('/ls')
 def list_ds():
-    q = query(ds_list).filter(document.status == 'active')
+    q = query(ds_list).filter(_get_access_clause()).filter(document.status == 'active')
     _id = request.args.get('id')
     if (_id):
         q.filter(document._id == ObjectId(_id))
@@ -63,11 +65,17 @@ def list_ds():
 
 @app.route('/ds/<ds_id>')
 def get_ds(ds_id):
+    if not _has_access(ds_id):
+        return list_response([])
+
     return list_response(conn.execute(query(ds[ds_id])))
 
 
 @app.route('/ds/<ds_id>/visualize')
 def visualize_ds(ds_id):
+    if not _has_access(ds_id):
+        return list_response([])
+
     # visualization pipeline (not to be confused with aggregation pipeline)
     # pipeline ::= [item 1, ...]
     # item ::= {col: <col name>, key: <path to value*>,
@@ -121,6 +129,9 @@ def visualize_ds(ds_id):
 
 @app.route('/ds/<ds_id>/filter')
 def filter_ds(ds_id):
+    if not _has_access(ds_id):
+        return list_response([])
+
     query_str = request.args['query']
     query = json.loads(query_str)
 
@@ -186,12 +197,18 @@ def update_ds_list_record(ds_id: Union[str, ObjectId], d: dict):
 
 
 def create_ds_list_blank_record(csv_file, type, extra):
-    return conn.execute(insert_one(ds_list, {
+    record = {
         'name': csv_file.filename,
         'type': type,
         'status': 'blank',
         'extra': extra
-    })).inserted_id
+    }
+    if 'access' not in extra or 'type' not in extra['access'] or\
+            extra['access']['type'] not in ['private', 'public']:
+        raise Exception('extra.access.type: \'public\' | \'private\' must be set')
+    if "user" in session:
+        record['owner'] = session['user']['_id']
+    return conn.execute(insert_one(ds_list, record)).inserted_id
 
 
 def get_ds_list_active_record(name):
@@ -216,9 +233,13 @@ def list_response(cursor: Iterable):
     }
 
 
-def serialize(record: dict):
-    record['id'] = str(record['_id']) \
-        if isinstance(record['_id'], ObjectId) \
-        else record['_id']
-    del record['_id']
-    return record
+def _get_access_clause() -> Expression:
+    clause = ds_list.extra.access.type == 'public'
+    if "user" in session:
+        return or_(clause, ds_list.owner == session["user"]['_id'])
+    return clause
+
+
+def _has_access(ds_id: Union[ObjectId, str]) -> bool:
+    q = query_one(ds_list).filter(and_(ds_list._id == ObjectId(ds_id), _get_access_clause()))
+    return conn.execute(q) is not None
