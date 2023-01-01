@@ -58,3 +58,4 @@ nn_model = Collection('nn_model')
 
 app_user = Collection('app_user')
 app_user_session = Collection('app_user_session')
+app_db_migration = Collection('app_db_migration')
