@@ -13,6 +13,8 @@ RUN pip install -r requirements.txt --extra-index-url http://my-handicapped-pet.
 COPY . .
 RUN cd app && pip install -e . && cd ..
 
+# use `--build-arg DATABASE_URL="$DATABASE_URL"` during build time
+ARG DATABASE_URL
 RUN python -m scripts.apply_migrations
 
 CMD [ "uwsgi", "--ini", "app.ini" ]
