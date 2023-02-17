@@ -85,3 +85,9 @@ ids.forEach((_id) => {
    db.ds_list.deleteMany({ _id })
 })
 ```
+
+### Drop orphan collections
+```javascript
+_ids = db.ds_list.find().map(rec => rec._id + '')
+for (let n of db.getCollectionNames()) { if(/^ds_[a-f0-9]{24}(!?_classification)?$/.test(n)) { const m = _ids.find(_id => n.indexOf(_id) !== -1); if (!m) { db[n].drop() }; }  }
+```

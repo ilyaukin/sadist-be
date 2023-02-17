@@ -13,7 +13,7 @@ of each country.
 from argparse import ArgumentParser
 
 from db import conn, geo_city, geo_country
-from mongomoron import query, insert_many
+from mongomoron import query, insert_many, delete
 
 
 def import_countries(filename: str):
@@ -36,16 +36,17 @@ def import_countries(filename: str):
 
     for country in countries:
         cities = cities_by_country.get(country['_id'])
-        if not  cities:
+        if not cities:
             continue
         country_coordinates = \
-            sum(city['loc']['coordinates'][0]
-                for city in cities) / len(cities), \
-            sum(city['loc']['coordinates'][1]
-                for city in cities) / len(cities)
+            round(sum(city['loc']['coordinates'][0]
+                for city in cities) / len(cities), 4), \
+            round(sum(city['loc']['coordinates'][1]
+                for city in cities) / len(cities), 4)
         country.update(
             {'loc': {'type': 'Point', 'coordinates': country_coordinates}})
 
+    conn.execute(delete(geo_country))
     conn.execute(insert_many(geo_country, countries))
 
 
