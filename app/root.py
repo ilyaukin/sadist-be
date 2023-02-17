@@ -169,7 +169,7 @@ def add_ds(ds_id, csv_file):
     old_record = get_ds_list_active_record(csv_file.filename)
     stream = io.StringIO(csv_file.stream.read().decode('UTF8'), newline=None)
     csv_reader = csv.DictReader(stream)
-    csv_rows = [csv_row for csv_row in csv_reader]
+    csv_rows = [{'_id': i, **csv_row} for i, csv_row in enumerate(csv_reader)]
     app.logger.debug(csv_rows)
     conn.execute(insert_many(ds[ds_id], csv_rows))
 
