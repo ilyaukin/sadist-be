@@ -5,19 +5,17 @@ import traceback
 from concurrent.futures._base import Future
 from typing import Union, Iterable
 
-from mongomoron.mongomoron import Expression
-
-from accumulator import get_accumulator, CountAccumulator
-from app import app
 from bson import ObjectId
+from flask import render_template, url_for, request, session
+from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
+    filter_, and_, update_one, insert_one, query_one, or_
+from mongomoron.mongomoron import Expression, avg, sum_, min_, max_
+
+from app import app
 from classification import PatternClassifier, \
     call_classify_cells
 from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
-from flask import render_template, url_for, request, session
-from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
-    filter_, and_, update_one, insert_one, query_one, or_
-
 from serializer import serialize
 
 
@@ -76,53 +74,66 @@ def visualize_ds(ds_id):
     if not _has_access(ds_id):
         return list_response([])
 
-    # visualization pipeline (not to be confused with aggregation pipeline)
-    # pipeline ::= [item 1, ...]
-    # item ::= {col: <col name>, key: <path to value*>,
-    # [accumulator: <accumulator>]}
-    # * path to the value to be used in visualization.
-    # if an item does not contain accumulator, grouping by this item
-    # will be applied, otherwise the accumulator will be applied.
+    # visualization pipeline (not to be confused with aggregation pipeline).
+    # format is defined in the frontend repo.
     pipeline_str = request.args['pipeline']
     pipeline = json.loads(pipeline_str)
 
-    # build aggregation pipeline
+    # build aggregation pipeline.
+    # first, combine details of the all involved columns,
+    # in the format {_id: <row id>, <col>: <detail>}
+    # todo: support different details of the same col in the same pipeline
+    # todo 2: support literal values if there's no label (from ds_xxx rather than ds_xxx_classification collection)
+    pipeline1 = [item for item in pipeline if 'col' in item and 'label' in item]
     p = aggregate(ds_classification[ds_id]) \
-        .match(document.col.in_(item['col'] for item in pipeline)) \
+        .match(document.col.in_(item['col'] for item in pipeline1)) \
         .group(document.row, col_details=push_(
         dict_(col=document.col, details=document.details))) \
-        .project(**dict((item['col'], filter_(lambda x: x.col == item['col'],
+        .project(**dict((item['col'], filter_(lambda x, item=item: x.col == item['col'],
                                               document.col_details)[0]) for item
-                        in pipeline)) \
+                        in pipeline1)) \
         .project(**dict((item['col'],
                          document.get_field(item['col']).details.get_field(
-                             item['key'])) for item in pipeline))
+                             item['label'])) for item in pipeline1))
 
-    # only 0 / 1 group level one so far
-    if 'accumulator' not in pipeline[0]:
-        _id = getattr(document, pipeline[0]['col'])
-        accumulated_items = pipeline[1:]
-    else:
-        _id = None
-        accumulated_items = pipeline
-    if accumulated_items:
-        accumulators = dict((item['col'],
-                             get_accumulator(item['accumulator'],
-                                             document.get_field(item['col'])))
-                            for item in accumulated_items)
-    else:
-        # default accumulator
-        accumulators = dict(count=CountAccumulator())
-
-    p.group(_id, **dict(
-        (col_name, accumulator.get_accumulator()) for col_name, accumulator in
-        accumulators.items()))
+    # make group by all items with action="group",
+    # and fields with all items with action="accumulate"
+    fields = dict()
+    reference = document
+    for i in reversed(range(len(pipeline))):
+        item = pipeline[i]
+        action = item['action']
+        key = item.get('key', 'f%i' % i)
+        col = item.get('col')
+        if action == 'accumulate':
+            accumulator = item.get('accumulater')
+            if accumulator:
+                fields[key] = {
+                    'count': sum_(1),
+                    'average': avg(document.get_field(col)),
+                    'min': min_(document.get_field(col)),
+                    'max': max_(document.get_field(col)),
+                }.get(accumulator)
+                if fields[key] is None:
+                    app.logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
+        elif action == 'group':
+            if i:
+                _id = dict_(**dict((item1['col'], reference.get_field(item1['col'])) for item1 in pipeline[:i + 1]))
+                reference = document._id
+            elif col:
+                _id = reference.get_field(col)
+            else:
+                _id = None
+            p.group(_id, **fields)
+            fields = {col: push_(dict_(_id=reference.get_field(col),
+                                       **dict((key1, document.get_field(key1)) for key1 in fields.keys())))}
+        else:
+            app.logger.warn("Action %s not implemented, skip")
 
     cursor = conn.execute(p)
     result = list(cursor)
 
-    for accumulator in accumulators.values():
-        accumulator.postprocess(result)
+    # todo here I aimed to do post-processing, but not implemented for now
 
     return list_response(result)
 
@@ -203,7 +214,7 @@ def create_ds_list_blank_record(csv_file, type, extra):
         'status': 'blank',
         'extra': extra
     }
-    if 'access' not in extra or 'type' not in extra['access'] or\
+    if 'access' not in extra or 'type' not in extra['access'] or \
             extra['access']['type'] not in ['private', 'public']:
         raise Exception('extra.access.type: \'public\' | \'private\' must be set')
     if "user" in session:

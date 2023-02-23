@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from unittest import TestCase, mock
 
@@ -142,6 +143,216 @@ def dataset1():
 
 
 @pytest.fixture
+@Patch
+def dataset2():
+    ds_id = ObjectId()
+    ds_collection = ds[str(ds_id)]
+    ds_classification_collection = ds_classification[str(ds_id)]
+
+    conn.execute(
+        delete(ds_list)
+    )
+    conn.execute(
+        insert_one(ds_list, {
+            '_id': ds_id,
+            'name': '1111.csv',
+            'extra': {
+                'access': {'type': 'public'}
+            }
+        })
+    )
+
+    conn.execute(
+        delete(ds_collection)
+    )
+    conn.execute(
+        insert_many(
+            ds_collection,
+            [
+                {
+                    '_id': 1,
+                    'Location': 'Moscow',
+                    'Profession': 'Architest',
+                    'Comment': '1111'
+                },
+                {
+                    '_id': 2,
+                    'Location': 'Paris',
+                    'Profession': 'Soution architest',
+                    'Comment': '2222'
+                },
+                {
+                    '_id': 3,
+                    'Location': 'MOscow',
+                    'Profession': 'Frontend developer',
+                    'Comment': '2344'
+                },
+                {
+                    '_id': 4,
+                    'Location': 'MOscow',
+                    'Profession': 'Backend developer',
+                    'Comment': '2344'
+                },
+                {
+                    '_id': 5,
+                    'Location': 'NYC',
+                    'Profession': 'backend',
+                    'Comment': '4444'
+                },
+                {
+                    '_id': 6,
+                    'Location': 'Msk',
+                    'Profession': 'Java Backend developer',
+                    'Comment': ''
+                }
+            ]
+        )
+    )
+
+    conn.execute(
+        delete(ds_classification_collection)
+    )
+    conn.execute(
+        insert_many(
+            ds_classification_collection,
+
+            [
+                {
+                    '_id': 1,
+                    'col': 'Location',
+                    'row': 1,
+                    'details': {
+                        'city': {
+                            'name': 'Moscow',
+                            'coordinates': [37.61556, 55.75222]
+                        }
+                    }
+                },
+                {
+                    '_id': 2,
+                    'col': 'Location',
+                    'row': 2,
+                    'details': {
+                        'city': {
+                            'name': 'Paris',
+                            'coordinates': [2.3488, 48.85341]
+                        }
+                    }
+                },
+                {
+                    '_id': 3,
+                    'col': 'Location',
+                    'row': 3,
+                    'details': {
+                        'city': {
+                            'name': 'Moscow',
+                            'coordinates': [37.61556, 55.75222]
+                        }
+                    }
+                },
+                {
+                    '_id': 4,
+                    'col': 'Location',
+                    'row': 4,
+                    'details': {
+                        'city': {
+                            'name': 'Moscow',
+                            'coordinates': [37.61556, 55.75222]
+                        }
+                    }
+                },
+                {
+                    '_id': 5,
+                    'col': 'Location',
+                    'row': 5,
+                    'details': {
+                        'city': {
+                            'name': 'New York',
+                            'coordinates': [-74.00597, 40.71427]
+                        }
+                    }
+                },
+                {
+                    '_id': 6,
+                    'col': 'Location',
+                    'row': 6,
+                    'details': {
+                        'city': {
+                            'name': 'Moscow',
+                            'coordinates': [37.61556, 55.75222]
+                        }
+                    }
+                },
+                {
+                    '_id': 7,
+                    'col': 'Profession',
+                    'row': 1,
+                    'details': {
+                        'profession': {
+                            'role': 'System Architest'
+                        }
+                    }
+                },
+                {
+                    '_id': 8,
+                    'col': 'Profession',
+                    'row': 2,
+                    'details': {
+                        'profession': {
+                            'role': 'System Architest'
+                        }
+                    }
+                },
+                {
+                    '_id': 9,
+                    'col': 'Profession',
+                    'row': 3,
+                    'details': {
+                        'profession': {
+                            'role': 'Frontend Developer'
+                        }
+                    }
+                },
+                {
+                    '_id': 10,
+                    'col': 'Profession',
+                    'row': 4,
+                    'details': {
+                        'profession': {
+                            'role': 'Backend Developer'
+                        }
+                    }
+                },
+                {
+                    '_id': 11,
+                    'col': 'Profession',
+                    'row': 5,
+                    'details': {
+                        'profession': {
+                            'role': 'Backend Developer'
+                        }
+                    }
+                },
+                {
+                    '_id': 12,
+                    'col': 'Profession',
+                    'row': 6,
+                    'details': {
+                        'profession': {
+                            'role': 'Backend Developer'
+                        }
+                    }
+                },
+            ]
+        )
+    )
+
+    return {
+        'ds_id': ds_id,
+    }
+
+
+@pytest.fixture
 def client():
     return app.test_client()
 
@@ -151,7 +362,8 @@ def test_visualize(client, dataset1):
     result = client \
         .get('/ds/%s/visualize' % dataset1['ds_id'],
              query_string='pipeline=' + json.dumps(
-                 [{'col': 'Location', 'key': 'city'}])) \
+                 [{'action': 'group', 'col': 'Location', 'label': 'city', 'key': 'Location city'},
+                  {'action': 'accumulate', 'accumulater': 'count', 'key': 'count'}])) \
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
@@ -183,6 +395,75 @@ def test_visualize(client, dataset1):
         }
     ]
     TestCase().assertCountEqual(expected_list, result["list"])
+
+
+@Patch
+def test_visualize_nested_group(client, dataset2):
+    result = client \
+        .get('/ds/%s/visualize' % dataset2['ds_id'],
+             query_string='pipeline=' + json.dumps(
+                 [{'action': 'group', 'col': 'Location', 'label': 'city', 'key': 'Location city'},
+                  {'action': 'group', 'col': 'Profession', 'label': 'profession.role', 'key': 'Profession role'},
+                  {'action': 'accumulate', 'accumulater': 'count', 'key': 'count'}])) \
+        .get_json()
+    assert isinstance(result, dict)
+    assert result['success'] == True
+    expected_list = [
+        {
+            'id': {
+                'name': 'Moscow',
+                'coordinates': [37.61556, 55.75222]
+            },
+            'Profession': [
+                {
+                    'id': 'System Architest',
+                    'count': 1
+                },
+                {
+                    'id': 'Backend Developer',
+                    'count': 2
+                },
+                {
+                    'id': 'Frontend Developer',
+                    'count': 1
+                }
+            ]
+        },
+        {
+            'id': {
+                'name': 'Paris',
+                'coordinates': [2.3488, 48.85341]
+            },
+            'Profession': [
+                {
+                    'id': 'System Architest',
+                    'count': 1
+                }
+            ]
+        },
+        {
+            'id': {
+                'name': 'New York',
+                'coordinates': [-74.00597, 40.71427]
+            },
+            'Profession': [
+                {
+                    'id': 'Backend Developer',
+                    'count': 1
+                }
+            ]
+        }
+    ]
+    case = TestCase()
+    case.maxDiff = None
+    assert len(expected_list) == len(result['list'])
+    for expected_list_item in expected_list:
+        expected_sub_list = expected_list_item['Profession']
+        actual_list_filtered = list(filter(lambda actual_list_item, expected_list_item=expected_list_item:
+                                           actual_list_item["id"] == expected_list_item["id"], result["list"]))
+        assert 1 == len(actual_list_filtered)
+        actual_sub_list = actual_list_filtered[0]['Profession']
+        case.assertCountEqual(expected_sub_list, actual_sub_list)
 
 
 @Patch
