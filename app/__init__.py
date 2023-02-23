@@ -13,6 +13,6 @@ Session(app)
 app.session_interface = UserSessionInterface()
 
 if os.path.exists('logging.ini'):
-    logging.config.fileConfig('logging.ini')
+    logging.config.fileConfig('logging.ini', disable_existing_loggers=False)
 
 from . import root, user, labelling, debug
