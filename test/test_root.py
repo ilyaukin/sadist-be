@@ -471,8 +471,8 @@ def test_filter(client, dataset1):
     result = client \
         .get('/ds/%s/filter' % dataset1['ds_id'],
              query_string='query=' + json.dumps(
-                 [{'col': 'Location', 'key': 'city.name',
-                   'values': ['Moscow']}])) \
+                 [{'col': 'Location', 'label': 'city.name',
+                   'predicate': {'op': 'in', 'values': ['Moscow']}}])) \
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
@@ -497,8 +497,8 @@ def test_filter_uncategorized(client, dataset1):
     result = client \
         .get('/ds/%s/filter' % dataset1['ds_id'],
              query_string='query=' + json.dumps(
-                 [{'col': 'Location', 'key': 'city.name',
-                   'values': [None]}])) \
+                 [{'col': 'Location', 'label': 'city.name',
+                   'predicate': {'op': 'in', 'values': [None]}}])) \
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
@@ -508,6 +508,32 @@ def test_filter_uncategorized(client, dataset1):
             'id': 5,
             'Location': '???',
             'Comment': '9999'
+        },
+    ]
+    TestCase().assertCountEqual(expected_list, result['list'])
+
+
+@Patch
+def test_filter_text_search(client, dataset1):
+    result = client \
+        .get('/ds/%s/filter' % dataset1['ds_id'],
+             query_string='query=' + json.dumps(
+                 [{'col': 'Comment',
+                   'predicate': {'op': 'instr', 'value': '44'}}])) \
+        .get_json()
+    assert isinstance(result, dict)
+    assert result['success'] == True
+
+    expected_list = [
+        {
+            'id': 3,
+            'Location': 'MOscow',
+            'Comment': '2344'
+        },
+        {
+            'id': 4,
+            'Location': 'NYC',
+            'Comment': '4444'
         },
     ]
     TestCase().assertCountEqual(expected_list, result['list'])

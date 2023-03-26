@@ -3,8 +3,9 @@ import io
 import json
 import traceback
 from concurrent.futures._base import Future
-from typing import Union, Iterable
+from typing import Union, Iterable, Optional
 
+import mongomoron.mongomoron
 from bson import ObjectId
 from flask import render_template, url_for, request, session
 from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
@@ -107,15 +108,17 @@ def visualize_ds(ds_id):
         col = item.get('col')
         if action == 'accumulate':
             accumulator = item.get('accumulater')
-            if accumulator:
-                fields[key] = {
-                    'count': sum_(1),
-                    'average': avg(document.get_field(col)),
-                    'min': min_(document.get_field(col)),
-                    'max': max_(document.get_field(col)),
-                }.get(accumulator)
-                if fields[key] is None:
-                    app.logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
+            if accumulator == 'count':
+                fields[key] = sum_(1)
+            elif accumulator == 'average':
+                fields[key] = avg(document.get_field(col))
+            elif accumulator == 'min':
+                fields[key] = min_(document.get_field(col))
+            elif accumulator == 'max':
+                fields[key] = max_(document.get_field(col))
+            else:
+                app.logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
+                fields[key] = None
         elif action == 'group':
             if i:
                 _id = dict_(**dict((item1['col'], reference.get_field(item1['col'])) for item1 in pipeline[:i + 1]))
@@ -128,7 +131,7 @@ def visualize_ds(ds_id):
             fields = {col: push_(dict_(_id=reference.get_field(col),
                                        **dict((key1, document.get_field(key1)) for key1 in fields.keys())))}
         else:
-            app.logger.warn("Action %s not implemented, skip")
+            app.logger.warn("Action %s not implemented, skip" % action)
 
     cursor = conn.execute(p)
     result = list(cursor)
@@ -150,27 +153,53 @@ def filter_ds(ds_id):
     if not query:
         return get_ds(ds_id)
 
-    p = aggregate(ds_classification[ds_id]) \
-        .match(and_(document.col == query[0]['col'],
-                    document.details.get_field(query[0]['key']).if_null(
-                        None).in_(query[0]['values']))) \
-        .project(document.row)
+    query_labeled = [item for item in query if 'label' in item]
+    query_raw = [item for item in query if 'label' not in item]
 
-    # match rest of the columns
-    for item in query[1:]:
-        p.lookup(ds_classification[ds_id], local_field='row',
-                 foreign_field='row', as_=item['col']) \
-            .project(document.row, **{item['col']: filter_(
-            lambda x: x.col == item['col'], document.get_field(item['col']))[
-            0]}) \
-            .match(
-            document.get_field(item['col']).details.get_field(
-                item['key']).if_null(None).in_(item['values'])) \
-            .project(document.row)
+    def parse_predicate(predicate: Optional[dict], arg: mongomoron.mongomoron.Expression) -> Optional[mongomoron.mongomoron.Expression]:
+        # parse JSON predicate into expression
+        if not predicate:
+            app.logger.warn("Predicate is empty")
+            return None
+
+        if predicate['op'] == 'eq':
+            expr = arg == predicate['value']
+        elif predicate['op'] == 'in':
+            expr = arg.in_(predicate['values'])
+        else:
+            app.logger.warn("Predicate operation %s not implemented" % predicate['op'])
+            expr = None
+        return expr
+
+    p: Optional[mongomoron.mongomoron.AggregationPipelineBuilder] = None
+    for item in query_labeled:
+        if not p:
+            p = aggregate(ds_classification[ds_id]) \
+                .match(document.col == item['col'])
+        else:
+            p = p.lookup(ds_classification[ds_id], local_field='row',
+                         foreign_field='row', as_='f') \
+                .project(document.row,
+                         f=filter_(lambda x, item=item: x.col == item['col'], document.f)[0]) \
+                .project(document.row, details=document.f.details)
+        expr = parse_predicate(item.get('predicate'),
+                               document.details.get_field(item['label']).if_null(None))
+        if expr:
+            p = p.match(expr).project(document.row)
 
     # match rows for the row id's
-    p.lookup(ds[ds_id], local_field='row', foreign_field='_id', as_='row_data') \
-        .replace_root(document.row_data[0])
+    if not p:
+        # use aggregate instead of query here to have the same interface
+        p = aggregate(ds[ds_id])
+    else:
+        p.lookup(ds[ds_id], local_field='row', foreign_field='_id', as_='row_data')\
+            .replace_root(document.row_data[0])
+
+    for item in query_raw:
+        expr = parse_predicate(item.get('predicate'),
+                               document.get_field(item['col']))
+        if expr:
+            p.match(expr)
 
     return list_response(conn.execute(p))
 
