@@ -33,21 +33,21 @@ def create_ds():
     ds_extra_string = request.form.get('extra', '{}')
     ds_extra = json.loads(ds_extra_string)
 
-    ds_id = create_ds_list_blank_record(csv_file, ds_type, ds_extra)
+    ds_id = _create_ds_list_blank_record(csv_file, ds_type, ds_extra)
 
     conn.create_collection(ds[ds_id])
     try:
-        add_ds(ds_id, csv_file)
+        _add_ds(ds_id, csv_file)
     except Exception as e:
-        update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
+        _update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
         # delete failed collection
         conn.drop_collection(ds[ds_id])
-        return error(e)
+        return _error(e)
 
-    process_ds(ds_id)
+    _process_ds(ds_id)
 
     return {
-        'item': serialize(get_ds_list_active_record(csv_file.filename)),
+        'item': serialize(_get_ds_list_active_record(csv_file.filename)),
         'success': True
     }
 
@@ -59,21 +59,21 @@ def list_ds():
     if (_id):
         q.filter(document._id == ObjectId(_id))
 
-    return list_response(conn.execute(q))
+    return _list_response(conn.execute(q))
 
 
 @app.route('/ds/<ds_id>')
 def get_ds(ds_id):
     if not _has_access(ds_id):
-        return list_response([])
+        return _list_response([])
 
-    return list_response(conn.execute(query(ds[ds_id])))
+    return _list_response(conn.execute(query(ds[ds_id])))
 
 
 @app.route('/ds/<ds_id>/visualize')
 def visualize_ds(ds_id):
     if not _has_access(ds_id):
-        return list_response([])
+        return _list_response([])
 
     # visualization pipeline (not to be confused with aggregation pipeline).
     # format is defined in the frontend repo.
@@ -138,13 +138,13 @@ def visualize_ds(ds_id):
 
     # todo here I aimed to do post-processing, but not implemented for now
 
-    return list_response(result)
+    return _list_response(result)
 
 
 @app.route('/ds/<ds_id>/filter')
 def filter_ds(ds_id):
     if not _has_access(ds_id):
-        return list_response([])
+        return _list_response([])
 
     query_str = request.args['query']
     query = json.loads(query_str)
@@ -201,12 +201,17 @@ def filter_ds(ds_id):
         if expr:
             p.match(expr)
 
-    return list_response(conn.execute(p))
+    return _list_response(conn.execute(p))
+
+
+@app.errorhandler(Exception)
+def handle_exception(e: Exception):
+    return _error(e)
 
 
 @conn.transactional
-def add_ds(ds_id, csv_file):
-    old_record = get_ds_list_active_record(csv_file.filename)
+def _add_ds(ds_id, csv_file):
+    old_record = _get_ds_list_active_record(csv_file.filename)
     stream = io.StringIO(csv_file.stream.read().decode('UTF8'), newline=None)
     csv_reader = csv.DictReader(stream)
     csv_rows = [{'_id': i, **csv_row} for i, csv_row in enumerate(csv_reader)]
@@ -216,12 +221,12 @@ def add_ds(ds_id, csv_file):
     # update old collection status to "old"
     # and new collection status to "active"
     if old_record:
-        update_ds_list_record(old_record['_id'], {'status': 'old'})
-    update_ds_list_record(ds_id,
-                          {'status': 'active', 'cols': csv_reader.fieldnames})
+        _update_ds_list_record(old_record['_id'], {'status': 'old'})
+    _update_ds_list_record(ds_id,
+                           {'status': 'active', 'cols': csv_reader.fieldnames})
 
 
-def process_ds(ds_id):
+def _process_ds(ds_id):
     def on_classify_done(future: Future):
         if not future.exception():
             call_get_details_for_all_cols(ds_id)
@@ -230,13 +235,13 @@ def process_ds(ds_id):
         .add_done_callback(on_classify_done)
 
 
-def update_ds_list_record(ds_id: Union[str, ObjectId], d: dict):
+def _update_ds_list_record(ds_id: Union[str, ObjectId], d: dict):
     conn.execute(update_one(ds_list) \
                  .filter(document._id == ObjectId(ds_id)) \
                  .set(d))
 
 
-def create_ds_list_blank_record(csv_file, type, extra):
+def _create_ds_list_blank_record(csv_file, type, extra):
     record = {
         'name': csv_file.filename,
         'type': type,
@@ -251,22 +256,17 @@ def create_ds_list_blank_record(csv_file, type, extra):
     return conn.execute(insert_one(ds_list, record)).inserted_id
 
 
-def get_ds_list_active_record(name):
+def _get_ds_list_active_record(name):
     return conn.execute(query_one(ds_list).filter(
         and_(ds_list.name == name, ds_list.status == 'active')))
 
 
-@app.errorhandler(Exception)
-def handle_exception(e: Exception):
-    return error(e)
-
-
-def error(e):
+def _error(e):
     app.logger.error(traceback.format_exc())
     return {'error': str(e)}, 500
 
 
-def list_response(cursor: Iterable):
+def _list_response(cursor: Iterable):
     return {
         'list': [serialize(record) for record in cursor],
         'success': True
