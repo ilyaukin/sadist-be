@@ -513,27 +513,52 @@ def test_filter_uncategorized(client, dataset1):
     TestCase().assertCountEqual(expected_list, result['list'])
 
 
+# @Patch
+# def test_filter_text_search(client, dataset1):
+#     result = client \
+#         .get('/ds/%s/filter' % dataset1['ds_id'],
+#              query_string='query=' + json.dumps(
+#                  [{'col': 'Comment',
+#                    'predicate': {'op': 'instr', 'value': '44'}}])) \
+#         .get_json()
+#     assert isinstance(result, dict)
+#     assert result['success'] == True
+#
+#     expected_list = [
+#         {
+#             'id': 3,
+#             'Location': 'MOscow',
+#             'Comment': '2344'
+#         },
+#         {
+#             'id': 4,
+#             'Location': 'NYC',
+#             'Comment': '4444'
+#         },
+#     ]
+#     TestCase().assertCountEqual(expected_list, result['list'])
+
+
 @Patch
-def test_filter_text_search(client, dataset1):
-    result = client \
-        .get('/ds/%s/filter' % dataset1['ds_id'],
-             query_string='query=' + json.dumps(
-                 [{'col': 'Comment',
-                   'predicate': {'op': 'instr', 'value': '44'}}])) \
+def test_get_label_values(client, dataset1):
+    result = client\
+        .get('/ds/%s/label-values?col=Location&label=city' % dataset1['ds_id'])\
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
 
     expected_list = [
         {
-            'id': 3,
-            'Location': 'MOscow',
-            'Comment': '2344'
+            'name': 'Moscow',
+            'coordinates': [37.61556, 55.75222]
         },
         {
-            'id': 4,
-            'Location': 'NYC',
-            'Comment': '4444'
+            'name': 'Paris',
+            'coordinates': [2.3488, 48.85341]
+        },
+        {
+            'name': 'New York',
+            'coordinates': [-74.00597, 40.71427]
         },
     ]
     TestCase().assertCountEqual(expected_list, result['list'])

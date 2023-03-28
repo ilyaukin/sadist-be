@@ -204,6 +204,22 @@ def filter_ds(ds_id):
     return _list_response(conn.execute(p))
 
 
+@app.route('/ds/<ds_id>/label-values')
+def get_label_values(ds_id):
+    if not _has_access(ds_id):
+        return _list_response([])
+
+    col = request.args['col']
+    label = request.args['label']
+
+    p = aggregate(ds_classification[ds_id])\
+        .match(document.col == col)\
+        .project(v=document.details.get_field(label))\
+        .group(None, vv=mongomoron.push_unique(document.v))
+
+    return _list_response(list(conn.execute(p))[0]['vv'])
+
+
 @app.errorhandler(Exception)
 def handle_exception(e: Exception):
     return _error(e)
