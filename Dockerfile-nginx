@@ -2,6 +2,13 @@ FROM nginx:latest
 
 EXPOSE 80 443
 
+COPY nginx-reloader.sh /
+COPY docker-entrypoint-override.sh /
+RUN apt-get update && apt-get install -y --no-install-recommends apt-utils
+RUN apt-get install -y inotify-tools
 RUN rm /etc/nginx/conf.d/default.conf
 
 COPY app.conf /etc/nginx/conf.d
+
+ENTRYPOINT [ "/docker-entrypoint-override.sh" ]
+CMD [ "nginx", "-g", "daemon off;" ]
