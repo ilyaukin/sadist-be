@@ -1,7 +1,6 @@
 import csv
 import io
 import json
-import traceback
 from concurrent.futures._base import Future
 from typing import Union, Iterable, Optional
 
@@ -17,6 +16,7 @@ from classification import PatternClassifier, \
     call_classify_cells
 from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
+from error_handler import error
 from serializer import serialize
 
 
@@ -42,7 +42,7 @@ def create_ds():
         _update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
         # delete failed collection
         conn.drop_collection(ds[ds_id])
-        return _error(e)
+        return error(e)
 
     _process_ds(ds_id)
 
@@ -220,11 +220,6 @@ def get_label_values(ds_id):
     return _list_response(list(conn.execute(p))[0]['vv'])
 
 
-@app.errorhandler(Exception)
-def handle_exception(e: Exception):
-    return _error(e)
-
-
 @conn.transactional
 def _add_ds(ds_id, csv_file):
     old_record = _get_ds_list_active_record(csv_file.filename)
@@ -275,11 +270,6 @@ def _create_ds_list_blank_record(csv_file, type, extra):
 def _get_ds_list_active_record(name):
     return conn.execute(query_one(ds_list).filter(
         and_(ds_list.name == name, ds_list.status == 'active')))
-
-
-def _error(e):
-    app.logger.error(traceback.format_exc())
-    return {'error': str(e)}, 500
 
 
 def _list_response(cursor: Iterable):

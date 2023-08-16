@@ -3,6 +3,7 @@ import traceback
 from concurrent.futures._base import Future
 from typing import Union, Optional, Any, Tuple
 
+import error_handler
 from app import app
 from async_loop import call_async
 from async_processing import process_in_parallel
@@ -76,7 +77,7 @@ def call_classify_cells(ds_id: Union[str, ObjectId],
     def _handle_async_exception(f: Future):
         e = f.exception()
         if e:
-            app.logger.error(traceback.format_exc())
+            error_handler.error(traceback.format_exc())
             _update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
 
     f = call_async(classify_cells, ds_id, classifier)

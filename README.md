@@ -27,7 +27,7 @@ cd app/
 pip install -e .
 ```
 
-- Run app: `./run.sh`
+- Run app: `python run.py`
 
 
 ### MongoDB
