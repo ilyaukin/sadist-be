@@ -15,4 +15,4 @@ app.session_interface = UserSessionInterface()
 if os.path.exists('logging.ini'):
     logging.config.fileConfig('logging.ini', disable_existing_loggers=False)
 
-from . import root, error_handler, user, labelling, debug, web_crawler, extra_pages
+from . import root, error_handler, user, labelling, debug, web_proxy, web_crawler, extra_pages

@@ -1,5 +1,7 @@
 import traceback
 
+import werkzeug.exceptions
+
 from app import app
 
 
@@ -11,3 +13,9 @@ def error(e):
 @app.errorhandler(Exception)
 def handle_exception(e: Exception):
     return error(e)
+
+
+@app.errorhandler(werkzeug.exceptions.HTTPException)
+def handle_http_exception(e: werkzeug.exceptions.HTTPException):
+    return {'error': e.name}, e.code
+
