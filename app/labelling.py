@@ -92,9 +92,8 @@ class LabellingInterface(object):
         # return the page itself  with embed session_id and labels
         # (maybe better to return bare page and do async API call,
         # not sure)
-        return render_template('labelling.html',
-                               fe_root=url_for('static',
-                                               filename='labelling.js'),
+        return render_template('spa.html',
+                               root='labelling.js',
                                data={'type': self._type, 'prefix': self._prefix,
                                      'sessionId': session_id,
                                      'labels': self.labels()})

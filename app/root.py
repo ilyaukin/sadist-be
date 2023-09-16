@@ -6,7 +6,7 @@ from typing import Union, Iterable, Optional
 
 import mongomoron.mongomoron
 from bson import ObjectId
-from flask import render_template, url_for, request, session
+from flask import render_template, request, session
 from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
     filter_, and_, update_one, insert_one, query_one, or_
 from mongomoron.mongomoron import Expression, avg, sum_, min_, max_
@@ -22,8 +22,7 @@ from serializer import serialize
 
 @app.route('/')
 def root():
-    return render_template('spa.html',
-                           fe_root=url_for('static', filename='root.js'))
+    return render_template('spa.html')
 
 
 @app.route('/ds', methods=['PUT'])

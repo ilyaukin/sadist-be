@@ -263,14 +263,14 @@ async def ref(slot_number, url):
 async def _open_page(slot, slot_number, url, timeout, sessionless=True):
     page = slot.page
     await page.goto(url, timeout=1000 * timeout)
-    await _patch(page, slot_number)
+    await _patch(page, slot_number, sessionless)
     html_content = await page.content()
     headers = await slot.interceptor.get_response_headers(url, timeout=timeout)
     response = _make_response(html_content, headers)
     return response
 
 
-async def _patch(page: Page, slot_number: int):
+async def _patch(page: Page, slot_number: int, sessionless: bool):
     """
     Patch a page to make links pointed to our proxy.
     This consists of
@@ -285,23 +285,31 @@ async def _patch(page: Page, slot_number: int):
     @return: None
     """
     new_url_prefix = f'/proxy/{slot_number}/ref/'
+    if sessionless:
+        new_a_url_prefix = f'/proxy?url='
+    else:
+        new_a_url_prefix = f'/proxy/{slot_number}/goto/'
 
     # this must include links and stylesheets
     elements = await page.querySelectorAll('*[href]')
     for element in elements:
         url = await element.getProperty('href')
         await page.evaluate('''
-        (element, prefix, url) => {
-            element.href = prefix + encodeURIComponent(url);
+        (element, prefix, a_prefix, url) => {
+            if (element.tagName.toLowerCase() == 'a') {
+                element.href = a_prefix + encodeURIComponent(url);
+            } else {
+                element.href = prefix + encodeURIComponent(url);
+            }
         }
-        ''', element, new_url_prefix, url)
+        ''', element, new_url_prefix, new_a_url_prefix, url)
 
     # this must include scripts and images
     elements = await page.querySelectorAll('*[src]')
     for element in elements:
         url = await element.getProperty('src')
         await page.evaluate('''
-        (element, prefix, url) => {
+        (element, prefix, a_prefix, url) => {
             element.src = prefix + encodeURIComponent(url);
         }
         ''', element, new_url_prefix, url)

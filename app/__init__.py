@@ -11,6 +11,7 @@ from user_session import UserSessionInterface
 app = Flask(__name__)
 asgi_app = WsgiToAsgi(app)
 app.session_interface = UserSessionInterface()
+app.static_folder = 'static'
 
 if os.path.exists('logging.ini'):
     logging.config.fileConfig('logging.ini', disable_existing_loggers=False)

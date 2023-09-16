@@ -54,6 +54,9 @@ class UserSession(dict, SessionMixin):
 
 class UserSessionInterface(SessionInterface):
     def open_session(self, app, request):
+        if request.path.startswith(app.static_url_path):
+            return UserSession()
+
         session_id = request.cookies.get(app.session_cookie_name)
 
         try:
