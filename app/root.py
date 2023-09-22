@@ -222,10 +222,20 @@ def get_label_values(ds_id):
 @conn.transactional
 def _add_ds(ds_id, csv_file):
     old_record = _get_ds_list_active_record(csv_file.filename)
-    stream = io.StringIO(csv_file.stream.read().decode('UTF8'), newline=None)
+    csv_str = csv_file.stream.read().decode('UTF8')
+    stream = io.StringIO(csv_str, newline=None)
     csv_reader = csv.DictReader(stream)
-    csv_rows = [{'_id': i, **csv_row} for i, csv_row in enumerate(csv_reader)]
-    app.logger.debug(csv_rows)
+    fieldnames = []
+    for name in csv_reader.fieldnames:
+        if name and name not in fieldnames:
+            fieldnames.append(name)
+
+    # again read CSV now with correct fields only
+    stream = io.StringIO(csv_str, newline=None)
+    csv_reader = csv.DictReader(stream, fieldnames=fieldnames)
+    csv_rows = [{'_id': i, **dict((k, v) for k, v in csv_row.items() if k)}
+                for i, csv_row in enumerate(csv_reader)][1:]
+    app.logger.debug(f'--------CSV START\n{csv_rows}\n--------CSV END')
     conn.execute(insert_many(ds[ds_id], csv_rows))
 
     # update old collection status to "old"
@@ -233,7 +243,7 @@ def _add_ds(ds_id, csv_file):
     if old_record:
         _update_ds_list_record(old_record['_id'], {'status': 'old'})
     _update_ds_list_record(ds_id,
-                           {'status': 'active', 'cols': csv_reader.fieldnames})
+                           {'status': 'active', 'cols': fieldnames})
 
 
 def _process_ds(ds_id):
