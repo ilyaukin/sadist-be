@@ -1,7 +1,9 @@
 import asyncio
+import time
 from asyncio import Future, Task
 from typing import Tuple, Optional, Dict, Union
 
+from bson import ObjectId
 from flask import request, make_response
 from pyppeteer import connect
 from pyppeteer.browser import Browser
@@ -80,6 +82,31 @@ class BrowserSlot(object):
             self._release_task = None
 
 
+class BrowserSession(object):
+    """
+    Session info
+    """
+    session_id: str
+    _slot: BrowserSlot
+    time_created: float
+    time_last_used: float
+    live_timeout: int
+    inactivity_timeout: int
+
+    def __init__(self, slot: BrowserSlot, live_timeout: int, inactivity_timeout: int):
+        self.session_id = str(ObjectId())
+        self._slot = slot
+        self.time_created = time.time()
+        self.time_last_used = time.time()
+        self.live_timeout = live_timeout
+        self.inactivity_timeout = inactivity_timeout
+
+    @property
+    def slot(self) -> BrowserSlot:
+        self.time_last_used = time.time()
+        return self._slot
+
+
 class BrowserPool(object):
     """
     Pool of browser slot with limited capacity.
@@ -88,31 +115,51 @@ class BrowserPool(object):
     CAPACITY = 1
     TIMEOUT = 10
     MAX_TIMEOUT = 60
+    LIVE_TIMEOUT = 600
+    session_map: dict[str, BrowserSession]
 
     def __init__(self):
         self.pool = [BrowserSlot(host='127.0.0.1', port=9222)]
+        self.session_map = {}
 
-    async def use_slot(self, timeout=TIMEOUT) -> Tuple[BrowserSlot, int]:
+    async def use_slot(self, timeout=TIMEOUT) -> Tuple[BrowserSlot, str]:
+        # cleanup when trying to use new one, maybe better schedule it?
+        await self._cleanup()
+
         timeout = self._timeout(timeout)
         for i in range(self.CAPACITY):
             slot = self.pool[i]
             if slot.free:
                 await slot.use()
 
-                # we don't want slot to be occupied forever,
-                # so create task to release it, now fixed time from first usage
-                # but have to be time from last usage...
-                # also here goes permission and quota check...
-                slot.release_after(timeout)
+                session = BrowserSession(slot, live_timeout=self.LIVE_TIMEOUT,
+                                         inactivity_timeout=timeout)
+                self.session_map[session.session_id] = session
 
-                return slot, i
+                return slot, session.session_id
         raise Exception('No browser slots available')
 
-    def __getitem__(self, i: int) -> BrowserSlot:
-        if 0 <= i < self.CAPACITY:
-            # here goes user session check
-            return self.pool[i]
-        raise IndexError(i)
+    def __getitem__(self, session_id: str) -> BrowserSlot:
+        if session_id in self.session_map:
+            session = self.session_map[session_id]
+            return session.slot
+        raise IndexError(session_id)
+
+    async def end_session(self, session_id: str):
+        if session_id in self.session_map:
+            session = self.session_map[session_id]
+            slot = session.slot
+            await slot.release()
+            del self.session_map[session_id]
+
+    async def _cleanup(self):
+        now = time.time()
+        keys = list(self.session_map.keys())
+        for session_id in keys:
+            session = self.session_map[session_id]
+            if (now - session.time_last_used > session.inactivity_timeout) \
+                    or (now - session.time_created > session.live_timeout):
+                await self.end_session(session_id)
 
     def _timeout(self, timeout: int):
         if not (0 < timeout <= self.MAX_TIMEOUT):
@@ -191,9 +238,9 @@ async def proxy():
     timeout = int(request.args.get('timeout', 10))
     if not url:
         raise Exception('Missing argument: url')
-    slot, slot_number = await pool.use_slot(timeout)
+    slot, session_id = await pool.use_slot(timeout)
     try:
-        response = await _open_page(slot, slot_number, url, timeout)
+        response = await _open_page(slot, session_id, url, timeout)
         return response
     except Exception as e:
         return error(e)
@@ -209,68 +256,68 @@ async def start_session():
     @return: session ID
     """
     timeout = int(request.args.get('timeout', 10))
-    _, slot_number = await pool.use_slot(timeout)
+    _, session_id = await pool.use_slot(timeout)
     return {
-        'id': slot_number,
+        'id': session_id,
         'success': True,
     }
 
 
-@app.route('/proxy/<int:slot_number>', methods=['DELETE'])
-async def delete_session(slot_number):
+@app.route('/proxy/<session_id>', methods=['DELETE'])
+async def delete_session(session_id):
     """
     Delete proxy session
-    @param slot_number: session ID
+    @param session_id: session ID
     @return: nothing
     """
-    await pool[slot_number].release()
+    await pool.end_session(session_id)
     return {
         'success': True,
     }
 
 
-@app.route('/proxy/<int:slot_number>/goto/<path:url>', methods=['GET'])
-async def goto(slot_number, url):
+@app.route('/proxy/<session_id>/goto/<path:url>', methods=['GET'])
+async def goto(session_id, url):
     """
     Goto URL
-    @param slot_number: session ID
+    @param session_id: session ID
     @param url: URL
     @return: HTML response
     """
     timeout = int(request.args.get('timeout', 10))
-    slot = pool[slot_number]
-    response = await _open_page(slot, slot_number, url, timeout, sessionless=False)
+    slot = pool[session_id]
+    response = await _open_page(slot, session_id, url, timeout, sessionless=False)
     return response
 
 
-@app.route('/proxy/<int:slot_number>/ref/<path:url>', methods=['GET'])
-async def ref(slot_number, url):
+@app.route('/proxy/<session_id>/ref/<path:url>', methods=['GET'])
+async def ref(session_id, url):
     """
     Get resource which page refers to.
 
     Currently supports only GET resources.
 
-    @param slot_number: Page's slot number
+    @param session_id: Page's session ID
     @param url: Resource URL
     @return: Resource as is.
     """
-    interceptor = pool[slot_number].interceptor
+    interceptor = pool[session_id].interceptor
     body = await interceptor.get_response_bytes(url)
     headers = await interceptor.get_response_headers(url)
     return _make_response(body, headers)
 
 
-async def _open_page(slot, slot_number, url, timeout, sessionless=True):
+async def _open_page(slot, session_id, url, timeout, sessionless=True):
     page = slot.page
     await page.goto(url, timeout=1000 * timeout)
-    await _patch(page, slot_number, sessionless)
+    await _patch(page, session_id, sessionless)
     html_content = await page.content()
     headers = await slot.interceptor.get_response_headers(url, timeout=timeout)
     response = _make_response(html_content, headers)
     return response
 
 
-async def _patch(page: Page, slot_number: int, sessionless: bool):
+async def _patch(page: Page, session_id: str, sessionless: bool):
     """
     Patch a page to make links pointed to our proxy.
     This consists of
@@ -284,32 +331,37 @@ async def _patch(page: Page, slot_number: int, sessionless: bool):
     @param page: Page to patch
     @return: None
     """
-    new_url_prefix = f'/proxy/{slot_number}/ref/'
+    new_url_prefix = f'/proxy/{session_id}/ref/'
     if sessionless:
         new_a_url_prefix = f'/proxy?url='
     else:
-        new_a_url_prefix = f'/proxy/{slot_number}/goto/'
+        new_a_url_prefix = f'/proxy/{session_id}/goto/'
 
     # this must include links and stylesheets
-    elements = await page.querySelectorAll('*[href]')
+    elements = await page.querySelectorAll(':not(a)[href]')
     for element in elements:
         url = await element.getProperty('href')
         await page.evaluate('''
-        (element, prefix, a_prefix, url) => {
-            if (element.tagName.toLowerCase() == 'a') {
-                element.href = a_prefix + encodeURIComponent(url);
-            } else {
-                element.href = prefix + encodeURIComponent(url);
-            }
+        (element, prefix, url) => {
+            element.href = prefix + encodeURIComponent(url);
         }
-        ''', element, new_url_prefix, new_a_url_prefix, url)
+        ''', element, new_url_prefix, url)
+
+    elements = await page.querySelectorAll('a[href]')
+    for element in elements:
+        url = await element.getProperty('href')
+        await page.evaluate('''
+        (element, prefix, url) => {
+            element.href = prefix + encodeURIComponent(url);
+        }
+        ''', element, new_a_url_prefix, url)
 
     # this must include scripts and images
     elements = await page.querySelectorAll('*[src]')
     for element in elements:
         url = await element.getProperty('src')
         await page.evaluate('''
-        (element, prefix, a_prefix, url) => {
+        (element, prefix, url) => {
             element.src = prefix + encodeURIComponent(url);
         }
         ''', element, new_url_prefix, url)
