@@ -8,13 +8,12 @@ from mongomoron import insert_one, update_one, query_one, and_
 from app import app
 from db import conn, app_user
 from serializer import serialize
+from user_helper import anon_
 
 
 @app.route('/user/whoami')
 def whoami():
-    if "user" in session:
-        return user_response(session["user"])
-    return user_response(anon_)
+    return user_response(session.get("user", anon_))
 
 
 @app.route('/user/login', methods=['POST'])
@@ -45,11 +44,6 @@ def user_response(u):
         'user': serialize(u),
         'success': True,
     }
-
-
-anon_ = {
-    'type': 'anon',
-}
 
 
 class User(object):

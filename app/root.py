@@ -18,11 +18,13 @@ from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
 from error_handler import error
 from serializer import serialize
+from user_helper import anon_
 
 
 @app.route('/')
 def root():
-    return render_template('spa.html')
+    return render_template('spa.html', data={'user': serialize(
+        session.get('user', anon_))})
 
 
 @app.route('/ds', methods=['PUT'])
