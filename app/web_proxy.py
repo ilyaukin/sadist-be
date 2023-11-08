@@ -11,7 +11,7 @@ from pyppeteer.launcher import get_ws_endpoint
 from pyppeteer.network_manager import Request, Response
 from pyppeteer.page import Page
 
-from app import app
+from app import app, logger
 from error_handler import error
 
 
@@ -200,12 +200,12 @@ class Interceptor(object):
         return bytes
 
     def _register_request(self, r: Request):
-        app.logger.debug("Request will be sent: %s", r.url)
+        logger.debug("Request will be sent: %s", r.url)
         self.req_map[r.url] = r
         self.future_res_map[r.url] = Future()
 
     def _register_response(self, r: Response):
-        app.logger.debug("Response received: %s", r.url)
+        logger.debug("Response received: %s", r.url)
         self.res_map[r.url] = r
         if r.url in self.future_res_map:
             self.future_res_map[r.url].set_result(r)

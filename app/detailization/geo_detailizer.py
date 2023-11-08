@@ -1,14 +1,10 @@
 import pickle
 import re
 import time
-from typing import Dict, List, Tuple, Iterable, Optional
+from typing import Dict, List, Tuple, Optional
 
 import bson
 import numpy as np
-from app import app
-from db import conn, dl_geo, geo_city, geo_country, nn_model
-from detailization.abstract_detailizer import AbstractDetailizer
-from detailization.geo_helper import serialize_city, serialize_country
 from mongomoron import query, update_one, query_one
 from pymongo.cursor import Cursor
 from tinynn.core.layer import Dense, ReLU
@@ -17,6 +13,11 @@ from tinynn.core.model import Model
 from tinynn.core.net import Net
 from tinynn.core.optimizer import Adam
 from tinynn.utils.data_iterator import BatchIterator
+
+from app import logger
+from db import conn, dl_geo, geo_city, geo_country, nn_model
+from detailization.abstract_detailizer import AbstractDetailizer
+from detailization.geo_helper import serialize_city, serialize_country
 
 
 class GeoDetailizer(AbstractDetailizer):
@@ -39,7 +40,7 @@ class GeoDetailizer(AbstractDetailizer):
     to cover typos in words.
     """
 
-    threshold = 1/3
+    threshold = 1 / 3
     labels = ['city', 'country']
 
     def learn(self, **kwargs):
@@ -156,22 +157,22 @@ def _train_model(**kwargs):
             model_output = model.forward(sample_instance)
             loss, grads = model.backward(model_output, sample_target)
             model.apply_grads(grads)
-        app.logger.info('Epoch %d took %.3fs for learning', epoch,
-                        time.time() - t)
+        logger.info('Epoch %d took %.3fs for learning', epoch,
+                    time.time() - t)
 
 
 def _create_model(w_count, t_count):
     layers = [
         # Dense(num_out=w_count),
         # ReLU(),
-        Dense(num_out=int(3/4 * w_count + 1/4 * t_count)),
+        Dense(num_out=int(3 / 4 * w_count + 1 / 4 * t_count)),
         ReLU(),
         Dense(num_out=t_count)
     ]
 
     net = Net(layers)
 
-    app.logger.info('Following model will be used:\n%s', net)
+    logger.info('Following model will be used:\n%s', net)
 
     return Model(net=net, loss=SoftmaxCrossEntropy(), optimizer=Adam())
 

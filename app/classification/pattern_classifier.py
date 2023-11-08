@@ -1,10 +1,11 @@
 from typing import List, Set, Dict, Hashable, Iterable, Tuple, Union, Optional
 
-from app import app
 from bson import ObjectId
+from mongomoron import delete, insert_one, query_one, query
+
+from app import logger
 from classification.abstract_classifier import AbstractClassifier
 from db import cl_pattern, conn, cl_pattern_char
-from mongomoron import delete, insert_one, query_one, query
 
 
 class PatternClassifier(AbstractClassifier):
@@ -88,7 +89,7 @@ class PatternClassifier(AbstractClassifier):
         def coupling(cluster: Set[Tuple[Hashable, int]]):
             return sum((likelihood.get((a, b), 0))
                        for a in cluster for b in cluster) / \
-                   len(cluster)
+                len(cluster)
 
         level = 0
 
@@ -169,8 +170,8 @@ class PatternClassifier(AbstractClassifier):
                 # choose this label
                 for label, count in sample_count.count_by_label.items():
                     if count / sample_count.count_total > .5:
-                        app.logger.info('Matched s=%s by %s with vote %s' %
-                                        (s, s_pattern, sample_count))
+                        logger.info('Matched s=%s by %s with vote %s' %
+                                    (s, s_pattern, sample_count))
                         return label
 
             # make a pattern of a higher level
@@ -182,10 +183,10 @@ class PatternClassifier(AbstractClassifier):
             for pattern_element in s_pattern.pattern:
                 char = Cache.get_char_by_pattern_element(pattern_element)
                 if not char:
-                    app.logger.warn('Pattern element (%s, %s) does not match'
-                                    'any char of level %d' %
-                                    (pattern_element[0], pattern_element[1],
-                                     level))
+                    logger.warn('Pattern element (%s, %s) does not match'
+                                'any char of level %d' %
+                                (pattern_element[0], pattern_element[1],
+                                 level))
                     return None
                 sequence.append(char)
 

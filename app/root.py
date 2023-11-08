@@ -11,7 +11,7 @@ from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
     filter_, and_, update_one, insert_one, query_one, or_
 from mongomoron.mongomoron import Expression, avg, sum_, min_, max_
 
-from app import app
+from app import app, logger
 from classification import PatternClassifier, \
     call_classify_cells
 from db import conn, ds, ds_list, ds_classification
@@ -118,7 +118,7 @@ def visualize_ds(ds_id):
             elif accumulator == 'max':
                 fields[key] = max_(document.get_field(col))
             else:
-                app.logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
+                logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
                 fields[key] = None
         elif action == 'group':
             if i:
@@ -132,7 +132,7 @@ def visualize_ds(ds_id):
             fields = {col: push_(dict_(_id=reference.get_field(col),
                                        **dict((key1, document.get_field(key1)) for key1 in fields.keys())))}
         else:
-            app.logger.warn("Action %s not implemented, skip" % action)
+            logger.warn("Action %s not implemented, skip" % action)
 
     cursor = conn.execute(p)
     result = list(cursor)
@@ -160,7 +160,7 @@ def filter_ds(ds_id):
     def parse_predicate(predicate: Optional[dict], arg: mongomoron.mongomoron.Expression) -> Optional[mongomoron.mongomoron.Expression]:
         # parse JSON predicate into expression
         if not predicate:
-            app.logger.warn("Predicate is empty")
+            logger.warn("Predicate is empty")
             return None
 
         if predicate['op'] == 'eq':
@@ -168,7 +168,7 @@ def filter_ds(ds_id):
         elif predicate['op'] == 'in':
             expr = arg.in_(predicate['values'])
         else:
-            app.logger.warn("Predicate operation %s not implemented" % predicate['op'])
+            logger.warn("Predicate operation %s not implemented" % predicate['op'])
             expr = None
         return expr
 
@@ -237,7 +237,7 @@ def _add_ds(ds_id, csv_file):
     csv_reader = csv.DictReader(stream, fieldnames=fieldnames)
     csv_rows = [{'_id': i, **dict((k, v) for k, v in csv_row.items() if k)}
                 for i, csv_row in enumerate(csv_reader)][1:]
-    app.logger.debug(f'--------CSV START\n{csv_rows}\n--------CSV END')
+    logger.debug(f'--------CSV START\n{csv_rows}\n--------CSV END')
     conn.execute(insert_many(ds[ds_id], csv_rows))
 
     # update old collection status to "old"
