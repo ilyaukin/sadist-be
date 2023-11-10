@@ -1,29 +1,30 @@
 import csv
 import io
 import json
-import traceback
 from concurrent.futures._base import Future
 from typing import Union, Iterable, Optional
 
 import mongomoron.mongomoron
 from bson import ObjectId
-from flask import render_template, url_for, request, session
+from flask import render_template, request, session
 from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
     filter_, and_, update_one, insert_one, query_one, or_
 from mongomoron.mongomoron import Expression, avg, sum_, min_, max_
 
-from app import app
+from app import app, logger
 from classification import PatternClassifier, \
     call_classify_cells
 from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
+from error_handler import error
 from serializer import serialize
+from user_helper import anon_
 
 
 @app.route('/')
 def root():
-    return render_template('spa.html',
-                           fe_root=url_for('static', filename='root.js'))
+    return render_template('spa.html', data={'user': serialize(
+        session.get('user', anon_))})
 
 
 @app.route('/ds', methods=['PUT'])
@@ -42,7 +43,7 @@ def create_ds():
         _update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
         # delete failed collection
         conn.drop_collection(ds[ds_id])
-        return _error(e)
+        return error(e)
 
     _process_ds(ds_id)
 
@@ -117,7 +118,7 @@ def visualize_ds(ds_id):
             elif accumulator == 'max':
                 fields[key] = max_(document.get_field(col))
             else:
-                app.logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
+                logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
                 fields[key] = None
         elif action == 'group':
             if i:
@@ -131,7 +132,7 @@ def visualize_ds(ds_id):
             fields = {col: push_(dict_(_id=reference.get_field(col),
                                        **dict((key1, document.get_field(key1)) for key1 in fields.keys())))}
         else:
-            app.logger.warn("Action %s not implemented, skip" % action)
+            logger.warn("Action %s not implemented, skip" % action)
 
     cursor = conn.execute(p)
     result = list(cursor)
@@ -159,7 +160,7 @@ def filter_ds(ds_id):
     def parse_predicate(predicate: Optional[dict], arg: mongomoron.mongomoron.Expression) -> Optional[mongomoron.mongomoron.Expression]:
         # parse JSON predicate into expression
         if not predicate:
-            app.logger.warn("Predicate is empty")
+            logger.warn("Predicate is empty")
             return None
 
         if predicate['op'] == 'eq':
@@ -167,7 +168,7 @@ def filter_ds(ds_id):
         elif predicate['op'] == 'in':
             expr = arg.in_(predicate['values'])
         else:
-            app.logger.warn("Predicate operation %s not implemented" % predicate['op'])
+            logger.warn("Predicate operation %s not implemented" % predicate['op'])
             expr = None
         return expr
 
@@ -220,18 +221,23 @@ def get_label_values(ds_id):
     return _list_response(list(conn.execute(p))[0]['vv'])
 
 
-@app.errorhandler(Exception)
-def handle_exception(e: Exception):
-    return _error(e)
-
-
 @conn.transactional
 def _add_ds(ds_id, csv_file):
     old_record = _get_ds_list_active_record(csv_file.filename)
-    stream = io.StringIO(csv_file.stream.read().decode('UTF8'), newline=None)
+    csv_str = csv_file.stream.read().decode('UTF8')
+    stream = io.StringIO(csv_str, newline=None)
     csv_reader = csv.DictReader(stream)
-    csv_rows = [{'_id': i, **csv_row} for i, csv_row in enumerate(csv_reader)]
-    app.logger.debug(csv_rows)
+    fieldnames = []
+    for name in csv_reader.fieldnames:
+        if name and name not in fieldnames:
+            fieldnames.append(name)
+
+    # again read CSV now with correct fields only
+    stream = io.StringIO(csv_str, newline=None)
+    csv_reader = csv.DictReader(stream, fieldnames=fieldnames)
+    csv_rows = [{'_id': i, **dict((k, v) for k, v in csv_row.items() if k)}
+                for i, csv_row in enumerate(csv_reader)][1:]
+    logger.debug(f'--------CSV START\n{csv_rows}\n--------CSV END')
     conn.execute(insert_many(ds[ds_id], csv_rows))
 
     # update old collection status to "old"
@@ -239,7 +245,7 @@ def _add_ds(ds_id, csv_file):
     if old_record:
         _update_ds_list_record(old_record['_id'], {'status': 'old'})
     _update_ds_list_record(ds_id,
-                           {'status': 'active', 'cols': csv_reader.fieldnames})
+                           {'status': 'active', 'cols': fieldnames})
 
 
 def _process_ds(ds_id):
@@ -275,11 +281,6 @@ def _create_ds_list_blank_record(csv_file, type, extra):
 def _get_ds_list_active_record(name):
     return conn.execute(query_one(ds_list).filter(
         and_(ds_list.name == name, ds_list.status == 'active')))
-
-
-def _error(e):
-    app.logger.error(traceback.format_exc())
-    return {'error': str(e)}, 500
 
 
 def _list_response(cursor: Iterable):

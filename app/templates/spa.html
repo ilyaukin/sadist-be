@@ -3,9 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <title>My handicapped pet</title>
+    <script type="application/javascript" src="{{ url_for('static', filename='react.js') }}"></script>
+    {% if data %}
+    <script type="application/javascript">
+        window.data = {{ data|tojson }}
+    </script>
+    {% endif %}
 </head>
 <body>
     <div id="container"></div>
-    <script type="application/javascript" src="{{ fe_root }}"></script>
+    <script type="application/javascript" src="{{ url_for('static', filename=root|default('root.js')) }}"></script>
 </body>
 </html>

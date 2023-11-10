@@ -5,7 +5,7 @@ ENV APP /app
 RUN mkdir $APP
 WORKDIR $APP
 
-EXPOSE 5000
+EXPOSE 8000
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt --extra-index-url http://my-handicapped-pet.io:3141/ilyaukin/dev --trusted-host my-handicapped-pet.io
@@ -17,4 +17,4 @@ RUN cd app && pip install -e . && cd ..
 ARG DATABASE_URL
 RUN python -m scripts.apply_migrations
 
-CMD [ "uwsgi", "--ini", "app.ini" ]
+CMD [ "python", "run.py" ]

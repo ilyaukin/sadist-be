@@ -3,15 +3,16 @@ import traceback
 from concurrent.futures._base import Future
 from typing import Union, Type, Iterable, Tuple
 
-import detailization
-from app import app
-from async_loop import call_async
-from async_processing import process_in_parallel
 from bson import ObjectId
-from db import conn, ds_classification, ds, ds_list
-from detailization.abstract_detailizer import AbstractDetailizer
 from mongomoron import update, aggregate, dict_, document, \
     sum_, push_
+
+import detailization
+from app import logger
+from async_loop import call_async
+from async_processing import process_in_parallel
+from db import conn, ds_classification, ds, ds_list
+from detailization.abstract_detailizer import AbstractDetailizer
 
 DETAILIZER_CLASSES = [t[1] for t in inspect.getmembers(detailization,
                                                        lambda
@@ -55,7 +56,7 @@ def call_get_details_for_cells(ds_id: Union[str, ObjectId],
     def _handle_async_exception(f: Future):
         e = f.exception()
         if e:
-            app.logger.error(traceback.format_exc())
+            logger.error(traceback.format_exc())
             _update_ds_list_record(ds_id, col,
                                    {'status': 'failed', 'error': str(e)})
 
@@ -66,7 +67,7 @@ def call_get_details_for_cells(ds_id: Union[str, ObjectId],
 
 def call_get_details_for_all_cols(ds_id: Union[str, ObjectId]) -> Iterable[
     Future]:
-    app.logger.debug('Detailization of DS %s started' % ds_id)
+    logger.debug('Detailization of DS %s started' % ds_id)
     ff = []
     p = aggregate(ds_classification[ds_id]) \
         .group(dict_(col=document.col, label=document.label), count=sum_(1)) \
@@ -82,8 +83,8 @@ def call_get_details_for_all_cols(ds_id: Union[str, ObjectId]) -> Iterable[
                    d['label'] in detailizer_class.labels) / \
                     sum(d['count'] for d in
                         labels) > detailizer_class.threshold:
-                app.logger.info('Col %s of DS %s will be detailized'
-                                ' via %s' % (col, ds_id, detailizer_class))
+                logger.info('Col %s of DS %s will be detailized'
+                            ' via %s' % (col, ds_id, detailizer_class))
                 _update_ds_list_record(ds_id, col, {'status': 'pending'})
                 f = call_get_details_for_cells(ds_id, col, detailizer_class())
                 ff.append(f)

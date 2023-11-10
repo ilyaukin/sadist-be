@@ -3,14 +3,15 @@ import traceback
 from concurrent.futures._base import Future
 from typing import Union, Optional, Any, Tuple
 
-from app import app
-from async_loop import call_async
-from async_processing import process_in_parallel
 from bson import ObjectId
-from classification.abstract_classifier import AbstractClassifier
-from db import conn, ds_classification, ds, ds_list, cl_stat
 from mongomoron import index, query, insert_many, update, insert_one, aggregate, \
     avg
+
+from app import logger
+from async_loop import call_async
+from async_processing import process_in_parallel
+from classification.abstract_classifier import AbstractClassifier
+from db import conn, ds_classification, ds, ds_list, cl_stat
 
 # settings
 CHUNK_SIZE = 100
@@ -76,7 +77,7 @@ def call_classify_cells(ds_id: Union[str, ObjectId],
     def _handle_async_exception(f: Future):
         e = f.exception()
         if e:
-            app.logger.error(traceback.format_exc())
+            logger.error(traceback.format_exc())
             _update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
 
     f = call_async(classify_cells, ds_id, classifier)

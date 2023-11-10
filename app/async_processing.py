@@ -6,7 +6,7 @@ import traceback
 from _queue import Empty
 from typing import Iterable, Callable, Tuple, Any, Optional, List
 
-from app import app
+from app import logger
 
 
 def process_in_parallel(input: Iterable, processor: Callable,
@@ -47,7 +47,7 @@ def process_in_parallel(input: Iterable, processor: Callable,
     def _cleanup():
         pp = [p for p in processes if p.is_alive()]
         for p in pp:
-            app.logger.warn('Process %d is still alive, killing...', p.pid)
+            logger.warn('Process %d is still alive, killing...', p.pid)
             # first try to gracefully terminate, to be able to see traceback
             p.terminate()
             p.join(timeout=1)
@@ -64,13 +64,13 @@ def process_in_parallel(input: Iterable, processor: Callable,
             else:
                 error_text = """Exception of async processing:
 %s""" % result.exc
-                app.logger.warn(error_text)
+                logger.warn(error_text)
                 _cleanup()
                 raise Exception(error_text)
         except Empty:
             error_text = """Timeout %ds of async processing.
 Only %d of %d tasks are completed.""" % (timeout, output_count, input_count)
-            app.logger.warn(error_text)
+            logger.warn(error_text)
             _cleanup()
             raise Exception(error_text) from None
 
@@ -107,7 +107,7 @@ def _process(input_queue: multiprocessing.Queue,
     except:
         output_queue.put(_Result.error(traceback.format_exc()))
     finally:
-        app.logger.info('Process %d has terminated normally', os.getpid())
+        logger.info('Process %d has terminated normally', os.getpid())
 
 
 MAX_PROCESS_COUNT = os.cpu_count()

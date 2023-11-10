@@ -5,22 +5,21 @@ from flask import request, session
 from jwt import PyJWKClient
 from mongomoron import insert_one, update_one, query_one, and_
 
-from app import app
+from app import app, logger
 from db import conn, app_user
 from serializer import serialize
+from user_helper import anon_
 
 
 @app.route('/user/whoami')
 def whoami():
-    if "user" in session:
-        return user_response(session["user"])
-    return user_response(anon_)
+    return user_response(session.get("user", anon_))
 
 
 @app.route('/user/login', methods=['POST'])
 def login():
     payload = request.get_json()
-    app.logger.debug("User is coming: %s" % payload)
+    logger.debug("User is coming: %s" % payload)
 
     u = payload["user"]
     user = User.of(u)
@@ -45,11 +44,6 @@ def user_response(u):
         'user': serialize(u),
         'success': True,
     }
-
-
-anon_ = {
-    'type': 'anon',
-}
 
 
 class User(object):
@@ -143,7 +137,7 @@ class GoogleUser(BaseUser):
             # client_id from Google Cloud console
             audience="252961976632-l3s7f785he9psfk0fm5q33cvk4ssms7s.apps.googleusercontent.com",
         )
-        app.logger.debug("Decoded id_token: %s" % jwt_decoded)
+        logger.debug("Decoded id_token: %s" % jwt_decoded)
         if self.u['extra']['id'] != jwt_decoded['sub']:
             raise Exception('Request forgery: ID does not match')
         self.u.update({'jwt_decoded': jwt_decoded})
