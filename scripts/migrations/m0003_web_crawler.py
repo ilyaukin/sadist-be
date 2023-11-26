@@ -2,6 +2,9 @@ from pymongo.database import Database
 
 
 def upgrade(db: Database):
+    db.wc_proxy.insert_many([
+        {'host': 'proxy1', 'port': 9222}
+    ])
     db.wc_script_template.insert_many([
         {
             '_id': 'simple single-page scrapper',
@@ -60,4 +63,5 @@ def upgrade(db: Database):
 
 
 def downgrade(db: Database):
+    db.wc_proxy.delete_many({})
     db.wc_script_template.delete_many({})

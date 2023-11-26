@@ -1,10 +1,12 @@
 import asyncio
+import socket
 import time
 from asyncio import Future, Task
 from typing import Tuple, Optional, Dict, Union
 
 from bson import ObjectId
 from flask import request, make_response
+from mongomoron import query
 from pyppeteer import connect
 from pyppeteer.browser import Browser
 from pyppeteer.launcher import get_ws_endpoint
@@ -12,6 +14,7 @@ from pyppeteer.network_manager import Request, Response
 from pyppeteer.page import Page
 
 from app import app, logger
+from db import conn, wc_proxy
 from error_handler import error
 
 
@@ -39,7 +42,9 @@ class BrowserSlot(object):
 
     async def use(self):
         # discovery url
-        endpoint = get_ws_endpoint(f'http://{self.host}:{self.port}')
+        # devtools want IP not host name here
+        host = socket.gethostbyname(self.host)
+        endpoint = get_ws_endpoint(f'http://{host}:{self.port}')
 
         # initiate browser
         self.browser = await connect(browserWSEndpoint=endpoint)
@@ -119,7 +124,10 @@ class BrowserPool(object):
     session_map: dict[str, BrowserSession]
 
     def __init__(self):
-        self.pool = [BrowserSlot(host='127.0.0.1', port=9222)]
+        proxy_config = [dict(host=proxy['host'], port=proxy['port'])
+                        for proxy in conn.execute(query(wc_proxy))]
+        self.pool = [BrowserSlot(**proxy) for proxy in proxy_config]
+        self.CAPACITY = len(self.pool)
         self.session_map = {}
 
     async def use_slot(self, timeout=TIMEOUT) -> Tuple[BrowserSlot, str]:

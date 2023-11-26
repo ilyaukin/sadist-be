@@ -16,3 +16,8 @@ services:
       dockerfile: Dockerfile-nginx
     depends_on:
       - flask
+
+  proxy1:
+    image: alpeware/chrome-headless-trunk
+    volumes:
+      - /tmp/chromedata:/data

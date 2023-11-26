@@ -31,6 +31,11 @@ services:
     volumes:
       - certbot_www:/var/www/certbot/
       - ssl_certs:/etc/letsencrypt/
+
+  proxy1:
+    networks:
+      - backend-network
+
 volumes:
   certbot_www:
   ssl_certs:
