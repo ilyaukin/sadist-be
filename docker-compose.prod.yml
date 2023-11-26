@@ -6,10 +6,12 @@ networks:
 services:
 
   flask:
+    restart: "unless-stopped"
     networks:
       - backend-network
 
   nginx:
+    restart: "unless-stopped"
     ports:
       - 80:80
       - 443:443
@@ -22,12 +24,18 @@ services:
 
   certbot:
     image: certbot
+    restart: "unless-stopped"
     build:
       context: .
       dockerfile: Dockerfile-certbot
     volumes:
       - certbot_www:/var/www/certbot/
       - ssl_certs:/etc/letsencrypt/
+
+  proxy1:
+    networks:
+      - backend-network
+
 volumes:
   certbot_www:
   ssl_certs:

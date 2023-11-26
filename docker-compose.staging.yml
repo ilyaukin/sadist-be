@@ -19,6 +19,10 @@ services:
       - build_certbot_www:/var/www/certbot/
       - build_ssl_certs:/etc/letsencrypt/
 
+  proxy1:
+    networks:
+      - backend-network-staging
+
 volumes:
   build_certbot_www:
     external: true
