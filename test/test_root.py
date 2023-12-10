@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from typing import Iterable, Any
 from unittest import TestCase, mock
 
 import mongomock
@@ -10,7 +11,7 @@ from bson import ObjectId
 from mongomoron import delete, insert_many, insert_one
 
 from app import app
-from db import conn, ds, ds_classification, ds_list
+from db import conn, ds, ds_classification, ds_list, geo_city
 
 test_database_url = 'mongodb://localhost:27017,127.0.0.1:27018/test_sadist_be?replicaSet=rs0'
 if os.getenv('USE_MONGOMOCK'):
@@ -18,6 +19,36 @@ if os.getenv('USE_MONGOMOCK'):
 else:
     test_client = pymongo.MongoClient(test_database_url)
 Patch = mock.patch.object(conn, 'mongo_client', lambda: test_client)
+
+
+def insert_cities():
+    conn.execute(delete(geo_city))
+    conn.execute(insert_many(geo_city, [
+        {
+            '_id': '1',
+            'name': 'Moscow',
+            'loc': {
+                'type': 'Point',
+                'coordinates': [37.61556, 55.75222],
+            }
+        },
+        {
+            '_id': '2',
+            'name': 'Paris',
+            'loc': {
+                'type': 'Point',
+                'coordinates': [2.3488, 48.85341],
+            }
+        },
+        {
+            '_id': '3',
+            'name': 'New York',
+            'loc': {
+                'type': 'Point',
+                'coordinates': [-74.00597, 40.71427],
+            }
+        },
+    ]))
 
 
 @pytest.fixture
@@ -34,8 +65,15 @@ def dataset1():
         insert_one(ds_list, {
             '_id': ds_id,
             'name': '1111.csv',
+            'status': 'active',
             'extra': {
                 'access': {'type': 'public'}
+            },
+            'cols': ['Location', 'Comment'],
+            'detailization': {
+                'Location': {
+                    'labels': ['city']
+                }
             }
         })
     )
@@ -90,8 +128,7 @@ def dataset1():
                     'row': 1,
                     'details': {
                         'city': {
-                            'name': 'Moscow',
-                            'coordinates': [37.61556, 55.75222]
+                            'id': '1'
                         }
                     }
                 },
@@ -101,8 +138,7 @@ def dataset1():
                     'row': 2,
                     'details': {
                         'city': {
-                            'name': 'Paris',
-                            'coordinates': [2.3488, 48.85341]
+                            'id': '2'
                         }
                     }
                 },
@@ -112,8 +148,7 @@ def dataset1():
                     'row': 3,
                     'details': {
                         'city': {
-                            'name': 'Moscow',
-                            'coordinates': [37.61556, 55.75222]
+                            'id': '1'
                         }
                     }
                 },
@@ -123,8 +158,7 @@ def dataset1():
                     'row': 4,
                     'details': {
                         'city': {
-                            'name': 'New York',
-                            'coordinates': [-74.00597, 40.71427]
+                            'id': '3'
                         }
                     }
                 },
@@ -136,6 +170,8 @@ def dataset1():
             ]
         )
     )
+
+    insert_cities()
 
     return {
         'ds_id': ds_id,
@@ -223,8 +259,7 @@ def dataset2():
                     'row': 1,
                     'details': {
                         'city': {
-                            'name': 'Moscow',
-                            'coordinates': [37.61556, 55.75222]
+                            'id': '1'
                         }
                     }
                 },
@@ -234,8 +269,7 @@ def dataset2():
                     'row': 2,
                     'details': {
                         'city': {
-                            'name': 'Paris',
-                            'coordinates': [2.3488, 48.85341]
+                            'id': '2'
                         }
                     }
                 },
@@ -245,8 +279,7 @@ def dataset2():
                     'row': 3,
                     'details': {
                         'city': {
-                            'name': 'Moscow',
-                            'coordinates': [37.61556, 55.75222]
+                            'id': '1'
                         }
                     }
                 },
@@ -256,8 +289,7 @@ def dataset2():
                     'row': 4,
                     'details': {
                         'city': {
-                            'name': 'Moscow',
-                            'coordinates': [37.61556, 55.75222]
+                            'id': '1'
                         }
                     }
                 },
@@ -267,8 +299,7 @@ def dataset2():
                     'row': 5,
                     'details': {
                         'city': {
-                            'name': 'New York',
-                            'coordinates': [-74.00597, 40.71427]
+                            'id': '3'
                         }
                     }
                 },
@@ -278,8 +309,7 @@ def dataset2():
                     'row': 6,
                     'details': {
                         'city': {
-                            'name': 'Moscow',
-                            'coordinates': [37.61556, 55.75222]
+                            'id': '1'
                         }
                     }
                 },
@@ -347,6 +377,8 @@ def dataset2():
         )
     )
 
+    insert_cities()
+
     return {
         'ds_id': ds_id,
     }
@@ -355,6 +387,114 @@ def dataset2():
 @pytest.fixture
 def client():
     return app.test_client()
+
+
+def assert_list_elements_equal(expected: Iterable, actual: Iterable, msg: Any = None):
+    case = TestCase()
+    case.maxDiff = None
+    case.assertCountEqual(expected, actual, msg)
+
+
+@Patch
+def test_list(client, dataset1):
+    result = client.get('/ls').get_json()
+    assert isinstance(result, dict)
+    assert result['success'] == True
+    expected_list = [
+        {
+            'id': str(dataset1['ds_id']),
+            'name': '1111.csv',
+            'status': 'active',
+            'extra': {
+                'access': {'type': 'public'}
+            },
+            'cols': ['Location', 'Comment'],
+            'detailization': {
+                'Location': {
+                    'labels': ['city']
+                }
+            }
+        }
+    ]
+    assert_list_elements_equal(expected_list, result['list'])
+
+
+@Patch
+def test_list_with_v_and_f(client, dataset1):
+    result = client.get('/ls?id=%s&-v=true&-f=true' % dataset1['ds_id']).get_json()
+    assert isinstance(result, dict)
+    assert result['success'] == True
+    expected_list = [
+        {
+            'id': str(dataset1['ds_id']),
+            'name': '1111.csv',
+            'status': 'active',
+            'extra': {
+                'access': {'type': 'public'}
+            },
+            'cols': ['Location', 'Comment'],
+            'detailization': {
+                'Location': {
+                    'labels': ['city']
+                }
+            },
+            'visualization': {
+                'Location': [
+                    {
+                        'key': 'Location city',
+                        'type': 'globe',
+                        'props': {
+                            'action': 'group',
+                            'col': 'Location',
+                            'label': 'city'
+                        },
+                        'stringrepr': 'Show cities',
+                        'labelselector': 'id.name'
+                    }
+                ]
+            },
+            'filtering': {
+                'Location': [
+                    {
+                        'type': 'multiselect',
+                        'col': 'Location',
+                        'label': 'city',
+                        'values': [
+                            {
+                                'id': '1',
+                                'name': 'Moscow',
+                                'loc': {
+                                    'type': 'Point',
+                                    'coordinates': [37.61556, 55.75222]
+                                }
+                            },
+                            {
+                                'id': '3',
+                                'name': 'New York',
+                                'loc': {
+                                    'type': 'Point',
+                                    'coordinates': [-74.00597, 40.71427]
+                                }
+                            },
+                            {
+                                'id': '2',
+                                'name': 'Paris',
+                                'loc': {
+                                    'type': 'Point',
+                                    'coordinates': [2.3488, 48.85341]
+                                }
+                            },
+                        ],
+                        'selected': [],
+                        'labelselector': 'name',
+                        'valueselector': 'id',
+                        'valuefield': 'city.id'
+                    }
+                ]
+            }
+        }
+    ]
+    assert_list_elements_equal(expected_list, result['list'])
 
 
 @Patch
@@ -371,21 +511,33 @@ def test_visualize(client, dataset1):
         {
             'id': {
                 'name': 'Moscow',
-                'coordinates': [37.61556, 55.75222]
+                'id': '1',
+                'loc': {
+                    'type': 'Point',
+                    'coordinates': [37.61556, 55.75222]
+                }
             },
             'count': 2
         },
         {
             'id': {
+                'id': '2',
                 'name': 'Paris',
-                'coordinates': [2.3488, 48.85341]
+                'loc': {
+                    'type': 'Point',
+                    'coordinates': [2.3488, 48.85341]
+                }
             },
             'count': 1
         },
         {
             'id': {
+                'id': '3',
                 'name': 'New York',
-                'coordinates': [-74.00597, 40.71427]
+                'loc': {
+                    'type': 'Point',
+                    'coordinates': [-74.00597, 40.71427]
+                }
             },
             'count': 1
         },
@@ -394,7 +546,7 @@ def test_visualize(client, dataset1):
             'count': 1
         }
     ]
-    TestCase().assertCountEqual(expected_list, result["list"])
+    assert_list_elements_equal(expected_list, result["list"])
 
 
 @Patch
@@ -408,62 +560,24 @@ def test_visualize_nested_group(client, dataset2):
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
-    expected_list = [
-        {
-            'id': {
-                'name': 'Moscow',
-                'coordinates': [37.61556, 55.75222]
-            },
-            'Profession': [
-                {
-                    'id': 'System Architest',
-                    'count': 1
-                },
-                {
-                    'id': 'Backend Developer',
-                    'count': 2
-                },
-                {
-                    'id': 'Frontend Developer',
-                    'count': 1
-                }
-            ]
-        },
-        {
-            'id': {
-                'name': 'Paris',
-                'coordinates': [2.3488, 48.85341]
-            },
-            'Profession': [
-                {
-                    'id': 'System Architest',
-                    'count': 1
-                }
-            ]
-        },
-        {
-            'id': {
-                'name': 'New York',
-                'coordinates': [-74.00597, 40.71427]
-            },
-            'Profession': [
-                {
-                    'id': 'Backend Developer',
-                    'count': 1
-                }
-            ]
-        }
-    ]
-    case = TestCase()
-    case.maxDiff = None
+    expected_list = [{'Profession role': [{'count': 1, 'id': 'System Architest'}],
+                      'id': {'loc': {'coordinates': [2.3488, 48.85341], 'type': 'Point'}, 'name': 'Paris', 'id': '2'}},
+                     {'Profession role': [{'count': 1, 'id': 'Backend Developer'}],
+                      'id': {'loc': {'coordinates': [-74.00597, 40.71427], 'type': 'Point'}, 'name': 'New York',
+                             'id': '3'}}, {
+                         'Profession role': [{'count': 1, 'id': 'Frontend Developer'},
+                                             {'count': 1, 'id': 'System Architest'},
+                                             {'count': 2, 'id': 'Backend Developer'}],
+                         'id': {'loc': {'coordinates': [37.61556, 55.75222], 'type': 'Point'}, 'name': 'Moscow',
+                                'id': '1'}}]
+
+    # assert nested list is equal without order
     assert len(expected_list) == len(result['list'])
-    for expected_list_item in expected_list:
-        expected_sub_list = expected_list_item['Profession']
-        actual_list_filtered = list(filter(lambda actual_list_item, expected_list_item=expected_list_item:
-                                           actual_list_item["id"] == expected_list_item["id"], result["list"]))
-        assert 1 == len(actual_list_filtered)
-        actual_sub_list = actual_list_filtered[0]['Profession']
-        case.assertCountEqual(expected_sub_list, actual_sub_list)
+    for item in expected_list:
+        item_id = item['id']
+        for key, subitem in item.items():
+            result_subitem = next(item for item in result['list'] if item_id == item['id'])[key]
+            assert_list_elements_equal(subitem, result_subitem, f'for {item_id}')
 
 
 @Patch
@@ -471,8 +585,8 @@ def test_filter(client, dataset1):
     result = client \
         .get('/ds/%s/filter' % dataset1['ds_id'],
              query_string='query=' + json.dumps(
-                 [{'col': 'Location', 'label': 'city.name',
-                   'predicate': {'op': 'in', 'values': ['Moscow']}}])) \
+                 [{'col': 'Location', 'label': 'city.id',
+                   'predicate': {'op': 'in', 'values': ['1']}}])) \
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
@@ -489,7 +603,7 @@ def test_filter(client, dataset1):
             'Comment': '2344'
         },
     ]
-    TestCase().assertCountEqual(expected_list, result['list'])
+    assert_list_elements_equal(expected_list, result['list'])
 
 
 @Patch
@@ -497,7 +611,7 @@ def test_filter_uncategorized(client, dataset1):
     result = client \
         .get('/ds/%s/filter' % dataset1['ds_id'],
              query_string='query=' + json.dumps(
-                 [{'col': 'Location', 'label': 'city.name',
+                 [{'col': 'Location', 'label': 'city.id',
                    'predicate': {'op': 'in', 'values': [None]}}])) \
         .get_json()
     assert isinstance(result, dict)
@@ -510,7 +624,7 @@ def test_filter_uncategorized(client, dataset1):
             'Comment': '9999'
         },
     ]
-    TestCase().assertCountEqual(expected_list, result['list'])
+    assert_list_elements_equal(expected_list, result['list'])
 
 
 # @Patch
@@ -541,24 +655,36 @@ def test_filter_uncategorized(client, dataset1):
 
 @Patch
 def test_get_label_values(client, dataset1):
-    result = client\
-        .get('/ds/%s/label-values?col=Location&label=city' % dataset1['ds_id'])\
+    result = client \
+        .get('/ds/%s/label-values?col=Location&label=city' % dataset1['ds_id']) \
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
 
     expected_list = [
         {
+            'id': '1',
             'name': 'Moscow',
-            'coordinates': [37.61556, 55.75222]
+            'loc': {
+                'type': 'Point',
+                'coordinates': [37.61556, 55.75222]
+            }
         },
         {
+            'id': '2',
             'name': 'Paris',
-            'coordinates': [2.3488, 48.85341]
+            'loc': {
+                'type': 'Point',
+                'coordinates': [2.3488, 48.85341]
+            }
         },
         {
+            'id': '3',
             'name': 'New York',
-            'coordinates': [-74.00597, 40.71427]
+            'loc': {
+                'type': 'Point',
+                'coordinates': [-74.00597, 40.71427]
+            }
         },
     ]
-    TestCase().assertCountEqual(expected_list, result['list'])
+    assert_list_elements_equal(expected_list, result['list'])
