@@ -1,5 +1,7 @@
 import os
+from typing import Union
 
+import gridfs
 import pymongo
 from mongomoron import DatabaseConnection, Collection
 from pymongo.database import Database
@@ -21,6 +23,10 @@ class SadistDatabaseConnection(DatabaseConnection):
 
     def db(self) -> Database:
         return self.mongo_client().get_database()
+
+    @property
+    def fs(self) -> gridfs.GridFS:
+        return gridfs.GridFS(self.db())
 
     def _new_client(self) -> pymongo.MongoClient:
         return pymongo.MongoClient(SadistDatabaseConnection.DATABASE_URL, socketTimeoutMS=30000)
@@ -53,6 +59,8 @@ dl_session = CollectionFamily('dl_session_%s')
 dl_session_list = Collection('dl_session')
 dl_master = Collection('dl_master')
 dl_geo = Collection('dl_geo')
+dl_seq = Collection('dl_seq')
+dl_seq_label = Collection('dl_seq_label')
 
 nn_model = Collection('nn_model')
 
@@ -63,3 +71,28 @@ app_db_migration = Collection('app_db_migration')
 
 wc_proxy = Collection('wc_proxy')
 wc_script_template = Collection('wc_script_template')
+
+
+def replace_grid_file(data: bytes, filename: str):
+    """
+    Create or replace a file in GridFS by filename
+    @param data: Binary file data
+    @param filename: filename
+    @return: None
+    """
+    old_file = conn.fs.find_one({'filename': filename})
+    if old_file:
+        conn.fs.delete(old_file._id)
+    conn.fs.put(data, filename=filename)
+
+
+def read_grid_file(filename: str) -> Union[bytes, None]:
+    """
+    Get data from the file in GridFS
+    @param filename: filename
+    @return: Binary data
+    """
+    file = conn.fs.find_one({'filename': filename})
+    if file:
+        return file.read()
+    return None

@@ -1,16 +1,20 @@
 import json
-from typing import Callable
+from typing import Callable, Union, Any, Optional
+
+from pymongo.cursor import Cursor
 
 from app import app
 import random
 
 from bson import ObjectId
 from db import conn, dl_session, dl_session_list, ds, \
-    dl_master, dl_geo, geo_country, geo_city
+    dl_master, dl_geo, geo_country, geo_city, dl_seq
 from flask import request, render_template, url_for
 from mongomoron import query_one, update_one, query, insert_one, index, \
     insert_many, document, Collection
 from werkzeug.utils import redirect
+
+from detailization.sequence_detailizer import SequenceDetailizer
 
 
 class LabellingInterface(object):
@@ -264,6 +268,35 @@ class ClassLabellingInterface(LabellingInterface):
                 'number', 'trash']
 
 
+class SequenceLabellingInterface(LabellingInterface):
+    """
+    Labelling interface for sequences of tokens
+    """
+
+    def __init__(self):
+        super().__init__(type='seq', prefix='/dlseq', collection=dl_seq)
+        self._det = None
+
+    def next_sample(self, session_id):
+        sample = super().next_sample(session_id)
+        text: Optional[str] = sample.get('text')
+        if text:
+            sample['sequence'] = self.detailizer.get_default_sequence(text)
+        return sample
+
+    def labels(self) -> list:
+        return self.detailizer.seq_labels
+
+    @property
+    def detailizer(self) -> SequenceDetailizer:
+        if not self._det:
+            self._det = SequenceDetailizer()
+        return self._det
+
+    def _ftob(self, label):
+        return json.loads(label)
+
+
 class GeoLabellingInterface(LabellingInterface):
     """
     Labelling interface for geo locations - cities and countries
@@ -316,4 +349,5 @@ class GeoLabellingInterface(LabellingInterface):
 
 # register all routes
 ClassLabellingInterface().routes()
+SequenceLabellingInterface().routes()
 GeoLabellingInterface().routes()

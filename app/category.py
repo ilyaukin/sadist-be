@@ -227,20 +227,24 @@ class CityCategory(Category):
         return self.join_by_dict(p, local_field, geo_city, dict(id='_id', name='name', loc='loc'))
 
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
-        return [Visualization(key=f'{col} city',
-                              type='globe',
-                              props=VizProps(action='group', col=col, label='city'),
-                              stringrepr='Show cities',
-                              labelselector='id.name')]
+        return [Visualization(
+            key=f'{col} city',
+            type='globe',
+            props=VizProps(action='group', col=col, label='city'),
+            stringrepr='Show cities',
+            labelselector='id.name')
+        ]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
-        return [MultiselectFilterProposal(col=col,
-                                          label='city',
-                                          values=self.get_values(ds_list_record['_id'], col),
-                                          selected=[],
-                                          labelselector='name',
-                                          valueselector='id',
-                                          valuefield='city.id')]
+        return [MultiselectFilterProposal(
+            col=col,
+            label='city',
+            values=self.get_values(ds_list_record['_id'], col),
+            selected=[],
+            labelselector='name',
+            valueselector='id',
+            valuefield='city.id')
+        ]
 
 
 @Category.labelled('country')
@@ -250,17 +254,21 @@ class CountryCategory(Category):
         return self.join_by_dict(p, local_field, geo_country, dict(id='_id', name='name', loc='loc'))
 
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
-        return [Visualization(key=f'{col} country',
-                              type='globe',
-                              props=VizProps(action='group', col=col, label='country'),
-                              stringrepr='Show countries',
-                              labelselector='id.name')]
+        return [Visualization(
+            key=f'{col} country',
+            type='globe',
+            props=VizProps(action='group', col=col, label='country'),
+            stringrepr='Show countries',
+            labelselector='id.name')
+        ]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
-        return [MultiselectFilterProposal(col=col,
-                                          label='country',
-                                          values=self.get_values(ds_list_record['_id'], col),
-                                          selected=[],
-                                          labelselector='name',
-                                          valueselector='id',
-                                          valuefield='country.id')]
+        return [MultiselectFilterProposal(
+            col=col,
+            label='country',
+            values=self.get_values(ds_list_record['_id'], col),
+            selected=[],
+            labelselector='name',
+            valueselector='id',
+            valuefield='country.id')
+        ]
