@@ -14,7 +14,7 @@ from mongomoron import query_one, update_one, query, insert_one, index, \
     insert_many, document, Collection
 from werkzeug.utils import redirect
 
-from detailization.sequence_detailizer import SequenceDetailizer
+from detailization import SequenceDetailizer
 
 
 class LabellingInterface(object):
@@ -275,7 +275,10 @@ class SequenceLabellingInterface(LabellingInterface):
 
     def __init__(self):
         super().__init__(type='seq', prefix='/dlseq', collection=dl_seq)
-        self._det = None
+
+    @property
+    def detailizer(self) -> SequenceDetailizer:
+        return SequenceDetailizer.get()
 
     def next_sample(self, session_id):
         sample = super().next_sample(session_id)
@@ -286,12 +289,6 @@ class SequenceLabellingInterface(LabellingInterface):
 
     def labels(self) -> list:
         return self.detailizer.seq_labels
-
-    @property
-    def detailizer(self) -> SequenceDetailizer:
-        if not self._det:
-            self._det = SequenceDetailizer()
-        return self._det
 
     def _ftob(self, label):
         return json.loads(label)

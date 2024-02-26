@@ -16,6 +16,7 @@ class CharType:
     PUNCTUATION = 3
 
 
+@AbstractDetailizer.sub
 class SequenceDetailizer(AbstractDetailizer):
     """
     A detailizer to split input into a sequence of tokens

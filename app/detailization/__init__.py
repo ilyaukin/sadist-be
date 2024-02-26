@@ -1,3 +1,4 @@
+from .abstract_detailizer import AbstractDetailizer
 from .sequence_detailizer import SequenceDetailizer
 from .geo_detailizer import GeoDetailizer
 from .get_details_for_cells import get_details_for_cells, call_get_details_for_all_cols

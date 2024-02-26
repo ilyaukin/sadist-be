@@ -14,8 +14,7 @@ from mongomoron.mongomoron import Expression, avg, sum_, min_, max_
 
 from app import app, logger
 from category import Category
-from classification import PatternClassifier, \
-    call_classify_cells
+from classification import call_classify_cells, PatternClassifier
 from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
 from error_handler import error
@@ -116,7 +115,7 @@ def visualize_ds(ds_id):
                              document.get_field(item['key']).details.get_field(item['label']))
                             for item in pipeline1))
         for item in pipeline1:
-            category = Category.by_label(item['label'])
+            category = Category.get(item['label'])
             if category:
                 category.join(p, document.get_field(item['key']))
         if pipeline0:
@@ -247,7 +246,7 @@ def get_label_values(ds_id):
     col = request.args['col']
     label = request.args['label']
 
-    category = Category.by_label(label)
+    category = Category.get(label)
     if category:
         return _list_response(category.get_values(ds_id, col))
 
@@ -286,7 +285,7 @@ def _process_ds(ds_id):
         if not future.exception():
             call_get_details_for_all_cols(ds_id)
 
-    call_classify_cells(ds_id, PatternClassifier()) \
+    call_classify_cells(ds_id, PatternClassifier.get()) \
         .add_done_callback(on_classify_done)
 
 

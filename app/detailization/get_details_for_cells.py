@@ -1,4 +1,3 @@
-import inspect
 import traceback
 from concurrent.futures._base import Future
 from typing import Union, Type, Iterable, Tuple
@@ -7,18 +6,11 @@ from bson import ObjectId
 from mongomoron import update, aggregate, dict_, document, \
     sum_, push_
 
-import detailization
 from app import logger
 from async_loop import call_async
 from async_processing import process_in_parallel
 from db import conn, ds_classification, ds, ds_list
 from detailization.abstract_detailizer import AbstractDetailizer
-
-DETAILIZER_CLASSES = [t[1] for t in inspect.getmembers(detailization,
-                                                       lambda
-                                                           m: inspect.isclass(
-                                                           m) and issubclass(m,
-                                                                             AbstractDetailizer))]
 
 
 def get_details_for_cells(ds_id: Union[str, ObjectId],
@@ -77,17 +69,16 @@ def call_get_details_for_all_cols(ds_id: Union[str, ObjectId]) -> Iterable[
     for aggregation_row in conn.execute(p):
         col = aggregation_row['_id']
         labels = aggregation_row['labels']
-        detailizer_class: Type[AbstractDetailizer]
-        for detailizer_class in DETAILIZER_CLASSES:
-            if sum(d['count'] for d in labels if
-                   d['label'] in detailizer_class.labels) / \
-                    sum(d['count'] for d in
-                        labels) > detailizer_class.threshold:
-                logger.info('Col %s of DS %s will be detailized'
-                            ' via %s' % (col, ds_id, detailizer_class))
-                _update_ds_list_record(ds_id, col, {'status': 'pending'})
-                f = call_get_details_for_cells(ds_id, col, detailizer_class())
-                ff.append(f)
+        for detailizer in AbstractDetailizer.get_all(lambda cls:
+                                                     sum(d['count'] for d in labels if
+                                                         d['label'] in cls.labels) / \
+                                                     sum(d['count'] for d in
+                                                         labels) > cls.threshold):
+            logger.info('Col %s of DS %s will be detailized'
+                        ' via %s' % (col, ds_id, detailizer.__class__.__name__))
+            _update_ds_list_record(ds_id, col, {'status': 'pending'})
+            f = call_get_details_for_cells(ds_id, col, detailizer)
+            ff.append(f)
     return ff
 
 

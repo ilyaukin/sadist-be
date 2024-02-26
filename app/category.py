@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Callable, Union, Optional, Type, Any, List, Iterable, Tuple
+from typing import Dict, Union, Optional, Any, List, Iterable, Tuple
 
 import mongomoron.mongomoron
 import pymongo
@@ -8,6 +8,7 @@ from mongomoron import document, aggregate, cond, dict_
 
 from db import geo_city, geo_country, ds_classification, conn
 from serializer import DO
+from singleton_mixin import SingletonMixin
 
 
 @dataclass
@@ -62,47 +63,20 @@ class SearchFilterProposal(DO):
 Filtering = Union[MultiselectFilterProposal, SearchFilterProposal]
 
 
-class Category(object):
+class Category(SingletonMixin):
     """
     Category is a class. That means, for a label, assigned during
     classification, it can be a corresponding category, which is
     responsible for working with details of this class of data.
     E.g., for currency it can convert all to a single one.
-    For timestep, format it etc. etc. etc.
+    For timestamp, format it etc. etc. etc.
 
     Category itself contains common methods for working with
     categories. This likely be extended in the future.
     """
 
-    label_to_category: Dict[str, 'Category'] = {}
-
-    def __init__(self, label: str):
-        self.label = label
-
-    @staticmethod
-    def labelled(label: str, cls: Optional[Type['Category']] = None) -> Union[Callable[[Type['Category']
-                                                                                        ], Type['Category']], Type[
-        'Category']]:
-        """
-        Add category assigned to label
-        @param cls: type of Category
-        @param label: label
-        @return: this Category, if passed, or a function that makes Category labelled
-        which can be used as a decorator
-        """
-        if cls:
-            Category.label_to_category[label] = cls(label)
-            return cls
-        return lambda cls: Category.labelled(label, cls)
-
-    @staticmethod
-    def by_label(label: str) -> Optional['Category']:
-        """
-        Get category by label
-        @param label: label
-        @return: category or None
-        """
-        return Category.label_to_category.get(label)
+    def __init__(self):
+        self.label = self.__class__.__key__
 
     def join(self, p: mongomoron.mongomoron.AggregationPipelineBuilder,
              local_field: mongomoron.mongomoron.Field) -> mongomoron.mongomoron.AggregationPipelineBuilder:
@@ -194,7 +168,7 @@ class Category(object):
                 if isinstance(details, dict) and 'labels' in details \
                         and isinstance(details.get('labels'), list):
                     for label in details.get('labels'):
-                        category = Category.by_label(label)
+                        category = Category.get(label)
                         if category:
                             yield col, label, category
 
@@ -220,7 +194,7 @@ class Category(object):
         return list(record['_id'] for record in conn.execute(p))
 
 
-@Category.labelled('city')
+@Category.sub('city')
 class CityCategory(Category):
     def join(self, p: mongomoron.mongomoron.AggregationPipelineBuilder,
              local_field: mongomoron.mongomoron.Field) -> mongomoron.mongomoron.AggregationPipelineBuilder:
@@ -247,7 +221,7 @@ class CityCategory(Category):
         ]
 
 
-@Category.labelled('country')
+@Category.sub('country')
 class CountryCategory(Category):
     def join(self, p: mongomoron.mongomoron.AggregationPipelineBuilder,
              local_field: mongomoron.mongomoron.Field) -> mongomoron.mongomoron.AggregationPipelineBuilder:

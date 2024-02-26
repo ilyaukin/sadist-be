@@ -4,9 +4,11 @@ from mongomoron import query
 from pymongo.cursor import Cursor
 
 from db import conn, geo_city, dl_geo
+from detailization.abstract_detailizer import AbstractDetailizer
 from detailization.bow_detailizer import BowDetailizer
 
 
+@AbstractDetailizer.sub
 class GeoDetailizer(BowDetailizer):
     """
     A detailizer which is mapping geo location as a plain text

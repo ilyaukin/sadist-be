@@ -8,6 +8,7 @@ from classification.abstract_classifier import AbstractClassifier
 from db import cl_pattern, conn, cl_pattern_char
 
 
+@AbstractClassifier.sub
 class PatternClassifier(AbstractClassifier):
     """
     Let say we have following data:
