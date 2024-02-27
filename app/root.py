@@ -14,7 +14,7 @@ from mongomoron.mongomoron import Expression, avg, sum_, min_, max_
 
 from app import app, logger
 from category import Category
-from classification import call_classify_cells, PatternClassifier
+from classification import call_classify_cells, PatternClassifier, SequenceClassifier
 from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
 from error_handler import error
@@ -285,7 +285,7 @@ def _process_ds(ds_id):
         if not future.exception():
             call_get_details_for_all_cols(ds_id)
 
-    call_classify_cells(ds_id, PatternClassifier.get()) \
+    call_classify_cells(ds_id, SequenceClassifier.get()) \
         .add_done_callback(on_classify_done)
 
 
