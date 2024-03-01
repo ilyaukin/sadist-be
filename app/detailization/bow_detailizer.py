@@ -80,6 +80,7 @@ class BowDetailizer(AbstractDetailizer):
 
         if key not in self.ttoi_map:
             self.ttoi_map[key] = len(self.ttoi_map)
+            self.targets.append(self._ktot(key))
         return self.ttoi_map[key]
 
     def _itot(self, i: int) -> Any:
@@ -152,15 +153,17 @@ class BowDetailizer(AbstractDetailizer):
     def _create_model(self, **kwargs):
         w_count = len(self.wtoi_map)
         t_count = len(self.ttoi_map)
-        epoch_count = kwargs.get('epoch_count', 10)
+        epoch_count = kwargs.get('epoch_count', 100)
         batch_size = kwargs.get('batch_size', 30)
 
         model = MLPClassifier(
-            solver='adam',
-            activation='logistic',
+            solver='adam' if w_count > 2000 else 'lbfgs',
+            activation='relu',
+            random_state=0,
             max_iter=epoch_count,
             batch_size=batch_size,
-            hidden_layer_sizes=[int(3 / 4 * w_count + 1 / 4 * t_count)]
+            hidden_layer_sizes=[int(3 / 4 * w_count + 1 / 4 * t_count)],
+            verbose=True,
         )
 
         logger.info('Following model will be used:\n%s', model)
