@@ -55,10 +55,13 @@ cl_pattern_char = Collection('cl_pattern_char')
 geo_city = Collection('geo_city')
 geo_country = Collection('geo_country')
 
+currency_list = Collection('currency_list')
+
 dl_session = CollectionFamily('dl_session_%s')
 dl_session_list = Collection('dl_session')
 dl_master = Collection('dl_master')
 dl_geo = Collection('dl_geo')
+dl_currency = Collection('dl_currency')
 dl_seq = Collection('dl_seq')
 dl_seq_label = Collection('dl_seq_label')
 

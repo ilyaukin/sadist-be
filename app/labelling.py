@@ -8,10 +8,10 @@ import random
 
 from bson import ObjectId
 from db import conn, dl_session, dl_session_list, ds, \
-    dl_master, dl_geo, geo_country, geo_city, dl_seq
+    dl_master, dl_geo, geo_country, geo_city, dl_seq, ds_classification, dl_currency, currency_list
 from flask import request, render_template, url_for
 from mongomoron import query_one, update_one, query, insert_one, index, \
-    insert_many, document, Collection
+    insert_many, document, Collection, aggregate
 from werkzeug.utils import redirect
 
 from detailization import SequenceDetailizer
@@ -30,7 +30,7 @@ class LabellingInterface(object):
     def routes(self):
         def _route(rule: str, func: Callable, **options):
             app.add_url_rule(self._prefix + rule,
-                             self._type + '.' + func.__name__,
+                             self.__class__.__name__ + '.' + func.__name__,
                              func,
                              **options)
 
@@ -47,14 +47,31 @@ class LabellingInterface(object):
         if not session_id:
             ds_id = request.args.get('ds_id', None)
             col = request.args.get('col', None)
+            seq_label_list = request.args.getlist('seq_label')
             if not ds_id:
                 raise Exception("For labelling session ds_id must be provided")
             limit = int(request.args.get('limit', 1000))
 
+            # if seq_label passed, get tokens from the detailized
+            # sequence instead of values from the DS
+            if seq_label_list:
+                p = aggregate(ds_classification[ds_id])
+                if col:
+                    p.match(document.col == col)
+                p.project(sequence=document.details.sequence) \
+                    .unwind(document.sequence) \
+                    .project(token=document.sequence.token, label=document.sequence.label) \
+                    .match(document.label.in_(seq_label_list))
+
+                cursor = conn.execute(p)
+                col = 'token'
+            else:
+                cursor = conn.execute(query(ds[ds_id]))
+
             # create new session based on data source
             # `ds_id` with `limit` capacity
             data = set()
-            for record in conn.execute(query(ds[ds_id])):
+            for record in cursor:
                 del record['_id']
                 if col:
                     s = str(record[col]).strip()
@@ -65,6 +82,11 @@ class LabellingInterface(object):
                         s = str(value).strip()
                         if s:
                             data.add(s)
+
+            # check if data exist
+            if not data:
+                raise Exception(f'There are no data by ds_id={ds_id}, col={col}, '
+                                f'seq_label={seq_label_list}')
 
             # any data from any columns (or `col` if specified) of the data
             # source
@@ -308,13 +330,13 @@ class GeoLabellingInterface(LabellingInterface):
                          conn.execute(query(geo_country)))
 
         return [{'value': 'null,null', 'text': '-'}] \
-               + [{'value': 'null,%s' % _id, 'text': name} for _id, name in
-                  countries.items()] \
-               + [{'value': '%s,%s' % (city['_id'], city['country_code']),
-                   'text': '%s, %s' % (
-                       city['name'], countries[city['country_code']])} for city
-                  in
-                  conn.execute(query(geo_city))]
+            + [{'value': 'null,%s' % _id, 'text': name} for _id, name in
+               countries.items()] \
+            + [{'value': '%s,%s' % (city['_id'], city['country_code']),
+                'text': '%s, %s' % (
+                    city['name'], countries[city['country_code']])} for city
+               in
+               conn.execute(query(geo_city))]
 
     def _btof(self, label: dict):
         city_id = label.get('city_id', None)
@@ -344,7 +366,21 @@ class GeoLabellingInterface(LabellingInterface):
         return result
 
 
+class CurrencyLabellingInterface(LabellingInterface):
+    """
+    Labelling interface for currencies
+    """
+    def __init__(self):
+        # let reuse UI of geo labelling
+        super().__init__('geo', '/dlcur', dl_currency)
+
+    def labels(self) -> list:
+        return [{'value': currency['_id'], 'text': f"{currency['_id']} - {currency['name']}"}
+                for currency in conn.execute(query(currency_list))]
+
+
 # register all routes
 ClassLabellingInterface().routes()
 SequenceLabellingInterface().routes()
 GeoLabellingInterface().routes()
+CurrencyLabellingInterface().routes()
