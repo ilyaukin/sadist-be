@@ -112,6 +112,65 @@ class SequenceDetailizer(AbstractDetailizer):
         else:
             return token
 
+    def _explode_sequence(self, sequence: List[dict], text: str) -> List[dict]:
+        """
+        For the lack of better name... make a labelled
+        sequence identical by tokens to the one obtained
+        by `split`. Thus, because during labelling
+        we can merge tokens (but not further split);
+        in order to reduce the problem of splitting
+        and assigning labels to just assigning labels to pre-`split`
+        text, we can assign to each of the initial token
+        label "continue" if it has been merged to the next one,
+        and initial label otherwise
+        @param sequence: sequence of tokens with labels
+        @return: new sequence
+        """
+        new_sequence = [{'token': token} for token in self.split(text)]
+        i = 0
+        token1 = ''
+        for item in new_sequence:
+
+            token = item['token']
+            token1 += token
+
+            def __fail(message: str, token1=token1):
+                raise Exception(f"Text {repr(text)} does not match sequence {sequence} on "
+                                f"{repr(token1)} ({message})")
+
+            if not (i < len(sequence)):
+                __fail('sequence ended')
+
+            token0 = sequence[i]['token']
+            if token0 == token1:
+                item['label'] = sequence[i]['label']
+                token1 = ''
+                i += 1
+            elif token0.startswith(token1):
+                item['label'] = f"continue[{sequence[i]['label']}]"
+            else:
+                __fail(f'{repr(token0)} expected')
+        return new_sequence
+
+    def _implode_sequence(self, sequence: List[dict]) -> List[dict]:
+        """
+        Do opposite to `_explode_sequence`... Thus, join
+        token to the next one if label is "continue", and keep label
+        as is otherwise
+        @param sequence: sequence of tokens with labels
+        @return: new sequence
+        """
+        new_sequence = []
+        token0 = ''
+        for item in sequence:
+            token0 += item['token']
+            if re.match(r'continue\[.*]', item['label']):
+                continue
+            else:
+                new_sequence.append({'token': token0, 'label': item['label']})
+                token0 = ''
+        return new_sequence
+
     def _get_features(self, tokens: Iterable[str]) -> List[List[str]]:
         """
         Get features for the list of tokens
@@ -128,7 +187,7 @@ class SequenceDetailizer(AbstractDetailizer):
         for i, f in enumerate(ff[1:]):
             f.update(dict((f'{k}[-1]', v) for k, v in ff[i - 1].items()))
         for i, f in enumerate(ff[2:]):
-            f.update(dict((f'{k}[2]', v) for k, v in ff[i - 2].items()))
+            f.update(dict((f'{k}[-2]', v) for k, v in ff[i - 2].items()))
         for i, f in enumerate(ff[:-1]):
             f.update(dict((f'{k}[1]', v) for k, v in ff[i + 1].items()))
         for i, f in enumerate(ff[:-2]):
@@ -143,8 +202,9 @@ class SequenceDetailizer(AbstractDetailizer):
     def _train_model(self, **kwargs):
         trainer = pycrfsuite.Trainer(verbose=True)
         for sample in self._get_samples():
-            xseq = self._get_features(item['token'] for item in sample['labels'][0])
-            yseq = [item['label'] for item in sample['labels'][0]]
+            sequence = self._explode_sequence(sample['labels'][0], sample['text'])
+            xseq = self._get_features(item['token'] for item in sequence)
+            yseq = [item['label'] for item in sequence]
             trainer.append(xseq, yseq)
 
         # just params from the example, not though on them
@@ -171,11 +231,10 @@ class SequenceDetailizer(AbstractDetailizer):
         self.tagger.open(f'/tmp/{self.model_name}.mod')
 
     def _predict(self, s: str):
-        # TODO consider case when actual token are merged
-        # of automatically split... Like 'New York'
         tokens = self.split(s)
 
         xpred = self._get_features(tokens)
         ypred = self.tagger.tag(xpred)
 
-        return {'sequence': [{'token': token, 'label': label} for token, label in zip(tokens, ypred)]}
+        sequence = [{'token': token, 'label': label} for token, label in zip(tokens, ypred)]
+        return {'sequence': self._implode_sequence(sequence)}
