@@ -4,4 +4,5 @@ from .datetime_detailizer import DatetimeDetailizer
 from .number_detailizer import NumberDetailizer
 from .money_detailizer import MoneyDetailizer
 from .geo_detailizer import GeoDetailizer
+from .gender_detailizer import GenderDetailizer
 from .get_details_for_cells import get_details_for_cells, call_get_details_for_all_cols
