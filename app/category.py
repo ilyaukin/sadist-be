@@ -1,10 +1,14 @@
+import datetime
+import math
 from dataclasses import dataclass
+from numbers import Number
 from typing import Dict, Union, Optional, Any, List, Iterable, Tuple
 
 import mongomoron.mongomoron
 import pymongo
 from bson import ObjectId
-from mongomoron import document, aggregate, cond, dict_
+from dateutil.relativedelta import relativedelta
+from mongomoron import document, aggregate, cond, dict_, min_, max_, percentile
 
 from db import geo_city, geo_country, ds_classification, conn
 from serializer import DO
@@ -24,12 +28,76 @@ class InPredicate(DO):
 
 
 @dataclass
+class InRangePredicate(DO):
+    op = 'inrange'
+    float_ = Union[int, float]
+    range_min: Number
+    range_max: Number
+
+
+@dataclass
+class GtPredicate(DO):
+    op = 'gt'
+    value: Number
+
+
+@dataclass
+class GtePredicate(DO):
+    op = 'gte'
+    value: Number
+
+
+@dataclass
+class LtPredicate(DO):
+    op = 'lte'
+    value: Number
+
+
+@dataclass
+class LtePredicate(DO):
+    op = 'lte'
+    value: Number
+
+
+@dataclass
+class OrPredicate(DO):
+    op = 'or'
+    expression: List['Predicate']
+
+
+@dataclass
+class AndPredicate(DO):
+    op = 'and'
+    expression: List['Predicate']
+
+
+@dataclass
+class NotPredicate(DO):
+    op = 'not'
+    expression: 'Predicate'
+
+
+Predicate = Union[EqPredicate, InPredicate, InRangePredicate, \
+    GtPredicate, GtePredicate, LtPredicate, LtePredicate, OrPredicate, \
+    AndPredicate, NotPredicate]
+
+
+@dataclass
+class RangeReducer(DO):
+    type = 'range'
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = None
+
+
+@dataclass
 class VizProps(DO):
     col: str
     label: Optional[str]
     action: str
-    predicate: Union[EqPredicate, InPredicate] = None
+    predicate: Predicate = None
     accumulater: Optional[str] = None
+    reducer: Union[RangeReducer] = None
 
 
 @dataclass
@@ -38,7 +106,7 @@ class Visualization(DO):
     type: str
     props: VizProps
     stringrepr: str
-    labelselector: str
+    labelselector: str = None
     children: Optional[Dict[str, 'Visualization']] = None
 
 
@@ -48,10 +116,20 @@ class MultiselectFilterProposal(DO):
     label: str
     values: List[Any]
     selected: List[Any]
-    labelselector: str
-    valueselector: str
-    valuefield: str
+    labelselector: str = None
+    valueselector: str = None
+    valuefield: str = None
     type: str = 'multiselect'
+
+
+@dataclass
+class RangeFilterProposal(DO):
+    col: str
+    label: str
+    min: Number
+    max: Number
+    labelformat: str = None
+    type: str = 'range'
 
 
 @dataclass
@@ -60,7 +138,7 @@ class SearchFilterProposal(DO):
     type: str = 'search'
 
 
-Filtering = Union[MultiselectFilterProposal, SearchFilterProposal]
+Filtering = Union[MultiselectFilterProposal, RangeFilterProposal, SearchFilterProposal]
 
 
 class Category(SingletonMixin):
@@ -77,6 +155,20 @@ class Category(SingletonMixin):
 
     def __init__(self):
         self.label = self.__class__.__key__
+
+    @staticmethod
+    def by_label(label: str) -> Optional['Category']:
+        """
+        Get category object by label. Difference with `get()` is
+        that label can refer to a deeper field, such as `city.id`.
+        This method gets a category related to the field in the
+        first level of details
+        @param label: Label (~ a DB field in the classification
+        collection relative to details)
+        @return: Category or None
+        """
+        ff = label.split('.')
+        return Category.get(ff[0])
 
     def join(self, p: mongomoron.mongomoron.AggregationPipelineBuilder,
              local_field: mongomoron.mongomoron.Field) -> mongomoron.mongomoron.AggregationPipelineBuilder:
@@ -193,6 +285,114 @@ class Category(SingletonMixin):
 
         return list(record['_id'] for record in conn.execute(p))
 
+    def get_boundaries(self, ds_id: Union[str, ObjectId], col: str, label: Optional[str] = None) \
+            -> Tuple[float, float]:
+        """
+        Get effective boundaries for the numerical values, all values
+        outside them will consider outliers.
+
+        IQR method is used, i.e. range of the central half of values, plus
+        1.5 of width of this range to left and to right are included.
+        @see https://en.wikipedia.org/wiki/Interquartile_range
+        @param ds_id: DS id
+        @param col: Column name
+        @param label: Field path relative to details. Defaulting to self.label
+        @return: Tuple min, max
+        """
+        field = document.details.get_field(label or self.label)
+        p = aggregate(ds_classification[ds_id]) \
+            .match(document.col == col). \
+            group(None, min=min_(field), max=max_(field), p=percentile(field, [.25, .75]))
+        for record in conn.execute(p):
+            abs_min = record['min']
+            abs_max = record['max']
+            p_min = record['p'][0]
+            p_max = record['p'][1]
+            center = .5 * (p_min + p_max)
+            b_min = max(center - 2 * (p_max - p_min), abs_min)
+            b_max = min(center + 2 * (p_max - p_min), abs_max)
+            # add a shift here because an upper border is non-inclusive in grouping
+            return b_min, b_max + .01 * (b_max - b_min)
+
+    def get_ranges(self, ds_id: Union[str, object], col: str, reducer: dict) -> \
+            Optional[List[Tuple[Tuple[float, float], str]]]:
+        """
+        Get ranges for the grouping of numerical values by ranges.
+        @param ds_id: DS id
+        @param col: Column name
+        @param reducer: RangeReducer passed from the frontend.
+        TODO cope with DO deserialization and make it a proper object type
+        @return: List of ranges in format ((min, max), range id)
+        """
+        return None
+
+
+@Category.sub('datetime')
+class DatetimeCategory(Category):
+    def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
+        return [Visualization(
+            key=f'{col} timeline',
+            type='histogram',
+            props=VizProps(
+                action='group',
+                col=col,
+                label='datetime.timestamp',
+                reducer=RangeReducer()
+            ),
+            stringrepr='Show timeline',
+            labelselector='id.name',
+        )]
+
+    def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
+        b_min, b_max = self.get_boundaries(ds_list_record['_id'], col, 'datetime.timestamp')
+        return [RangeFilterProposal(
+            col=col,
+            label='datetime.timestamp',
+            min=b_min,
+            max=b_max,
+            labelformat='datetime',
+        )]
+
+    def get_ranges(self, ds_id: Union[str, object], col: str, reducer: dict) -> \
+            Optional[List[Tuple[Tuple[float, float], str]]]:
+        if 'min' not in reducer or 'max' not in reducer:
+            timestamp_min, timestamp_max = self.get_boundaries(ds_id, col, 'datetime.timestamp')
+
+        # define boundaries
+        timestamp_min = reducer.get('min', timestamp_min)
+        timestamp_max = reducer.get('max', timestamp_max)
+
+        # define a step within boundaries, to match
+        # natural time steps (years, months...)
+        steps = [
+            (1, '%d %b %Y %H:%M:%S', relativedelta(seconds=1)),
+            (60, '%d %b %Y %H:%M', relativedelta(minutes=1)),
+            (3600, '%d %b %Y %I%p', relativedelta(hours=1)),
+            (86400, '%d %b %Y', relativedelta(days=1)),
+            (2629800, '%b %Y', relativedelta(months=1)),
+            (31557600, '%Y', relativedelta(years=1)),
+        ]
+        for step in steps:
+            step_size, _, _ = step
+            if (timestamp_max - timestamp_min) / step_size <= 100:
+                break
+
+        # fill ranges with given step
+        ranges = []
+        _, fmt, delta = step
+        t = datetime.datetime.fromtimestamp(timestamp_min)
+        while t.timestamp() < timestamp_max:
+            interval = t.strftime(fmt)
+            t = datetime.datetime.strptime(interval, fmt)
+            interval_start = t.timestamp()
+
+            t += delta
+            interval_end = t.timestamp()
+
+            ranges.append(((interval_start, interval_end), interval))
+
+        return ranges
+
 
 @Category.sub('city')
 class CityCategory(Category):
@@ -206,8 +406,8 @@ class CityCategory(Category):
             type='globe',
             props=VizProps(action='group', col=col, label='city'),
             stringrepr='Show cities',
-            labelselector='id.name')
-        ]
+            labelselector='id.name'
+        )]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
         return [MultiselectFilterProposal(
@@ -217,8 +417,8 @@ class CityCategory(Category):
             selected=[],
             labelselector='name',
             valueselector='id',
-            valuefield='city.id')
-        ]
+            valuefield='city.id'
+        )]
 
 
 @Category.sub('country')
@@ -233,8 +433,8 @@ class CountryCategory(Category):
             type='globe',
             props=VizProps(action='group', col=col, label='country'),
             stringrepr='Show countries',
-            labelselector='id.name')
-        ]
+            labelselector='id.name'
+        )]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
         return [MultiselectFilterProposal(
@@ -244,5 +444,83 @@ class CountryCategory(Category):
             selected=[],
             labelselector='name',
             valueselector='id',
-            valuefield='country.id')
-        ]
+            valuefield='country.id'
+        )]
+
+
+@Category.sub('number')
+class NumberCategory(Category):
+    def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
+        return [Visualization(
+            key=f'{col} average',
+            type='bar',
+            props=VizProps(action='accumulate', col=col, label='number', accumulater='avg'),
+            stringrepr='Show average',
+        ), Visualization(
+            key=f'{col} median',
+            type='bar',
+            props=VizProps(action='accumulate', col=col, label='number', accumulater='median'),
+            stringrepr='Show median',
+        ), Visualization(
+            key=f'{col} distribution',
+            type='histogram',
+            props=VizProps(action='group', col=col, label='number', reducer=RangeReducer()),
+            stringrepr='Show distribution',
+            labelselector='id.name',
+        )]
+
+    def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
+        b_min, b_max = self.get_boundaries(ds_list_record['_id'], col, 'number')
+        return [RangeFilterProposal(
+            col=col,
+            label='number',
+            min=b_min,
+            max=b_max,
+        )]
+
+    def get_ranges(self, ds_id: Union[str, object], col: str, reducer: dict) -> \
+            Optional[List[Tuple[Tuple[float, float], str]]]:
+        if 'min' not in reducer or 'max' not in reducer:
+            b_min, b_max = self.get_boundaries(ds_id, col, 'number')
+
+        # define boundaries
+        b_min = reducer.get('min', b_min)
+        b_max = reducer.get('max', b_max)
+
+        # define step within boundaries to be a round number
+        # as much as possible
+        p = int(math.log(b_max - b_min, 10)) - 1
+        step = 10 ** p
+        b = b_min - (b_min % step)
+        ranges = []
+        while b < b_max:
+            ranges.append(((b, b + step), f'{b} \u2014 {b + step}'))
+            b += step
+
+        return ranges
+
+
+@Category.sub('money')
+class MoneyCategory(NumberCategory):
+    # TODO convert currency etc...
+    pass
+
+
+@Category.sub('gender')
+class GenderCategory(Category):
+    def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
+        return [Visualization(
+            key=f'{col} gender',
+            type='histogram',
+            props=VizProps(action='group', col=col, label='gender'),
+            stringrepr='Show distribution',
+            labelselector='id',
+        )]
+
+    def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
+        return [MultiselectFilterProposal(
+            col=col,
+            label='gender',
+            values=self.get_values(ds_list_record['_id'], col),
+            selected=[],
+        )]

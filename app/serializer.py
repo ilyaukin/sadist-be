@@ -22,7 +22,10 @@ def serialize_value(v):
     if isinstance(v, (int, float, str, bool)) or v is None:
         return v
     if isinstance(v, DO):
-        return serialize(dict((k, v) for k, v in v.__dict__.items() if v is not None))
+        # dir() instead of __dict__ to keep class ("constant") attributes
+        return serialize(dict((k, getattr(v, k))
+                              for k in dir(v) if not k.startswith('__')
+                              and getattr(v, k, None) is not None))
     if hasattr(v, '__iter__'):
         return [serialize_value(i) for i in v]
     return str(v)

@@ -8,9 +8,10 @@ import mongomoron.mongomoron
 import pymongo
 from bson import ObjectId
 from flask import render_template, request, session
-from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
-    filter_, and_, update_one, insert_one, query_one, or_
-from mongomoron.mongomoron import Expression, avg, sum_, min_, max_
+from mongomoron import insert_many, query, document, aggregate, push_, \
+    list_, dict_, filter_, and_, update_one, insert_one, query_one, \
+    or_, not_, switch, avg, sum_, min_, max_, median
+from mongomoron.mongomoron import Expression
 
 from app import app, logger
 from category import Category
@@ -115,9 +116,16 @@ def visualize_ds(ds_id):
                              document.get_field(item['key']).details.get_field(item['label']))
                             for item in pipeline1))
         for item in pipeline1:
-            category = Category.get(item['label'])
+            category = Category.by_label(item['label'])
             if category:
                 category.join(p, document.get_field(item['key']))
+                # if requested accumulators like mean, median etc...
+                # count them only within the boundaries
+                if item.get('action') == 'accumulate' and \
+                        item.get('accumulater') in ['avg', 'median', 'min', 'max']:
+                    boundaries = category.get_boundaries(ds_id, item['col'], item['label'])
+                    p.match(and_(document.get_field(item['key']) >= boundaries[0],
+                                 document.get_field(item['key']) < boundaries[1]))
         if pipeline0:
             p.lookup(ds[ds_id], foreign_field='_id', local_field='_id', as_='literal_values') \
                 .project(*list(item['key'] for item in pipeline1), liteal_value=document.literal_values[0]) \
@@ -137,26 +145,53 @@ def visualize_ds(ds_id):
             accumulator = item.get('accumulater')
             if accumulator == 'count':
                 fields[key] = sum_(1)
-            elif accumulator == 'average':
+            elif accumulator == 'avg' or accumulator == 'average':
                 fields[key] = avg(document.get_field(key))
+            elif accumulator == 'median':
+                fields[key] = median(document.get_field(key))
             elif accumulator == 'min':
                 fields[key] = min_(document.get_field(key))
             elif accumulator == 'max':
                 fields[key] = max_(document.get_field(key))
             else:
                 logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
-                fields[key] = None
         elif action == 'group':
+            field = reference.get_field(key)
             if i:
-                _id = dict_(**dict((item1['key'], reference.get_field(item1['key'])) for item1 in pipeline[:i + 1]))
+                # make a nested group
+                _id = dict_(**dict((item1['key'], reference.get_field(item1['key']))
+                                   for item1 in pipeline[:i + 1]))
+                p.group(_id, **fields)
                 reference = document._id
+                fields = {key: push_(dict_(_id=reference.get_field(key),
+                                           **dict((key1, document.get_field(key1)) for key1 in fields.keys())))}
+            elif item.get('reducer'):
+                # make a group by ranges
+                # todo combine it with multi-level
+                category = Category.by_label(item.get('label'))
+                if not category:
+                    raise Exception(f"Reducer can be applied only within known categories: "
+                                    f"{Category.__map__.keys()}. Got {repr(item.get('label'))} instead.")
+                ranges = category.get_ranges(ds_id, col, item.get('reducer'))
+                if not ranges:
+                    raise Exception(f"No ranges for {field._name}!")
+                lowbond = [range[0] for range, _ in ranges]
+                lowbond.append(ranges[-1][0][1])
+                p.facet(bucket=aggregate().bucket(field, lowbond, 'outliers', **fields)) \
+                    .add_fields(range=(dict_(_id=dict_(name=range_name, range=range),
+                                             value=filter_(lambda f: f._id == range[0], document.bucket)[0])
+                                       for range, range_name in ranges)) \
+                    .unwind(document.range) \
+                    .replace_root(document.range)\
+                    .project(**dict((key1, document.value.get_field(key1)) for key1 in fields.keys()))
             elif col:
-                _id = reference.get_field(key)
+                # make a final group of the multi-level grouping or an only group in the single-level grouping
+                _id = field
+                p.group(_id, **fields)
             else:
+                # make a single group (all-rows aggregation)
                 _id = None
-            p.group(_id, **fields)
-            fields = {key: push_(dict_(_id=reference.get_field(key),
-                                       **dict((key1, document.get_field(key1)) for key1 in fields.keys())))}
+                p.group(_id, **fields)
         else:
             logger.warn("Action %s not implemented, skip" % action)
 
@@ -194,6 +229,22 @@ def filter_ds(ds_id):
             expr = arg == predicate['value']
         elif predicate['op'] == 'in':
             expr = arg.in_(predicate['values'])
+        elif predicate['op'] == 'inrange':
+            expr = and_(arg >= predicate['range_min'], arg < predicate['range_max'])
+        elif predicate['op'] == 'gt':
+            expr = arg > predicate['value']
+        elif predicate['op'] == 'gte':
+            expr = arg >= predicate['value']
+        elif predicate['op'] == 'lt':
+            expr = arg < predicate['value']
+        elif predicate['op'] == 'lte':
+            expr = arg <= predicate['value']
+        elif predicate['op'] == 'or':
+            expr = or_(*[parse_predicate(expr1, arg) for expr1 in predicate['expression']])
+        elif predicate['op'] == 'and':
+            expr = and_(*[parse_predicate(expr1, arg) for expr1 in predicate['expression']])
+        elif predicate['op'] == 'not':
+            expr = not_(parse_predicate(predicate['expression'], arg))
         else:
             logger.warn("Predicate operation %s not implemented" % predicate['op'])
             expr = None
