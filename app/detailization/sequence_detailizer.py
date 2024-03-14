@@ -1,3 +1,4 @@
+import os
 import re
 from typing import List, Union, Iterable, Dict
 
@@ -223,12 +224,12 @@ class SequenceDetailizer(AbstractDetailizer):
             replace_grid_file(data, f'nn_model_{self.model}')
 
     def _load_model(self):
-        with open(f'/tmp/{self.model_name}.mod', 'wb') as file:
+        with open(f'/tmp/{self.model_name}.{os.getpid()}.mod', 'wb') as file:
             data = read_grid_file(f'nn_model_{self.model}')
             file.write(data)
 
         self.tagger = pycrfsuite.Tagger()
-        self.tagger.open(f'/tmp/{self.model_name}.mod')
+        self.tagger.open(f'/tmp/{self.model_name}.{os.getpid()}.mod')
 
     def _predict(self, s: str):
         tokens = self.split(s)
