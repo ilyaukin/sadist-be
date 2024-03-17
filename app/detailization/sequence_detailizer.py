@@ -203,6 +203,8 @@ class SequenceDetailizer(AbstractDetailizer):
     def _train_model(self, **kwargs):
         trainer = pycrfsuite.Trainer(verbose=True)
         for sample in self._get_samples():
+            if len(sample['text']) > 500:
+                continue
             sequence = self._explode_sequence(sample['labels'][0], sample['text'])
             xseq = self._get_features(item['token'] for item in sequence)
             yseq = [item['label'] for item in sequence]
