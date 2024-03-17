@@ -7,6 +7,8 @@ from app import app
 import random
 
 from bson import ObjectId
+
+from collections_helper import objectset
 from db import conn, dl_session, dl_session_list, ds, \
     dl_master, dl_geo, geo_country, geo_city, dl_seq, ds_classification, dl_currency, currency_list
 from flask import request, render_template, url_for
@@ -174,15 +176,15 @@ class LabellingInterface(object):
         conflicts = []
         for text, master_sample in master_dict.items():
             session_sample = session_dict[text]
-            master_labels = set(master_sample['labels'])
-            session_labels = set(session_sample['labels'])
+            master_labels = objectset(master_sample['labels'])
+            session_labels = objectset(session_sample['labels'])
 
             if (master_labels == session_labels):
                 pass
             elif session_sample.get('override', False):
                 pass
             else:
-                all_labels = master_labels.union(session_labels)
+                all_labels = master_labels | session_labels
                 diff = []
                 for label in all_labels:
                     label_in_master = label in master_labels
