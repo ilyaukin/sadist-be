@@ -1,7 +1,9 @@
 from typing import Iterable, Tuple
 
+from singleton_mixin import SingletonMixin
 
-class AbstractClassifier(object):
+
+class AbstractClassifier(SingletonMixin):
     """
     Base interface to implement classifiers.
     Classification here means assigning one of labels to a text.

@@ -1,7 +1,9 @@
 from typing import Dict
 
+from singleton_mixin import SingletonMixin
 
-class AbstractDetailizer(object):
+
+class AbstractDetailizer(SingletonMixin):
 
     """
     If more than `threshold` values of a column are

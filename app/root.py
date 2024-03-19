@@ -5,15 +5,17 @@ from concurrent.futures._base import Future
 from typing import Union, Iterable, Optional
 
 import mongomoron.mongomoron
+import pymongo
 from bson import ObjectId
 from flask import render_template, request, session
-from mongomoron import insert_many, query, document, aggregate, push_, dict_, \
-    filter_, and_, update_one, insert_one, query_one, or_
-from mongomoron.mongomoron import Expression, avg, sum_, min_, max_
+from mongomoron import insert_many, query, document, aggregate, push_, \
+    list_, dict_, filter_, and_, update_one, insert_one, query_one, \
+    or_, not_, switch, avg, sum_, min_, max_, median
+from mongomoron.mongomoron import Expression
 
 from app import app, logger
-from classification import PatternClassifier, \
-    call_classify_cells
+from category import Category
+from classification import call_classify_cells, PatternClassifier, SequenceClassifier
 from db import conn, ds, ds_list, ds_classification
 from detailization import call_get_details_for_all_cols
 from error_handler import error
@@ -60,7 +62,19 @@ def list_ds():
     if (_id):
         q.filter(document._id == ObjectId(_id))
 
-    return _list_response(conn.execute(q))
+    cursor = conn.execute(q)
+    v = request.args.get('-v')
+    f = request.args.get('-f')
+    if v or f:
+        result = list(cursor)
+        for record in result:
+            if v:
+                record.setdefault('visualization', Category.get_all_visualization(record))
+            if f:
+                record.setdefault('filtering', Category.get_all_filtering(record))
+        return _list_response(result)
+
+    return _list_response(cursor)
 
 
 @app.route('/ds/<ds_id>')
@@ -80,23 +94,43 @@ def visualize_ds(ds_id):
     # format is defined in the frontend repo.
     pipeline_str = request.args['pipeline']
     pipeline = json.loads(pipeline_str)
+    pipeline = [{**item, 'key': item.get('key', 'f%i' % i)} for i, item in enumerate(pipeline)]
 
     # build aggregation pipeline.
     # first, combine details of the all involved columns,
-    # in the format {_id: <row id>, <col>: <detail>}
-    # todo: support different details of the same col in the same pipeline
-    # todo 2: support literal values if there's no label (from ds_xxx rather than ds_xxx_classification collection)
+    # in the format {_id: <row id>, <key>: <detail>}
+    pipeline0 = [item for item in pipeline if 'col' in item and 'label' not in item]
     pipeline1 = [item for item in pipeline if 'col' in item and 'label' in item]
-    p = aggregate(ds_classification[ds_id]) \
-        .match(document.col.in_(item['col'] for item in pipeline1)) \
-        .group(document.row, col_details=push_(
-        dict_(col=document.col, details=document.details))) \
-        .project(**dict((item['col'], filter_(lambda x, item=item: x.col == item['col'],
-                                              document.col_details)[0]) for item
-                        in pipeline1)) \
-        .project(**dict((item['col'],
-                         document.get_field(item['col']).details.get_field(
-                             item['label'])) for item in pipeline1))
+    if not pipeline1:
+        p = aggregate(ds[ds_id]).project(**dict((item['key'], document.get_field(item['col'])) for item in pipeline0))
+    else:
+        p = aggregate(ds_classification[ds_id]) \
+            .match(document.col.in_(item['col'] for item in pipeline1)) \
+            .group(document.row, col_details=push_(
+            dict_(col=document.col, details=document.details))) \
+            .project(**dict((item['key'],
+                             filter_(lambda x, item=item: x.col == item['col'],
+                                     document.col_details)[0])
+                            for item in pipeline1)) \
+            .project(**dict((item['key'],
+                             document.get_field(item['key']).details.get_field(item['label']))
+                            for item in pipeline1))
+        for item in pipeline1:
+            category = Category.by_label(item['label'])
+            if category:
+                category.join(p, document.get_field(item['key']))
+                # if requested accumulators like mean, median etc...
+                # count them only within the boundaries
+                if item.get('action') == 'accumulate' and \
+                        item.get('accumulater') in ['avg', 'median', 'min', 'max']:
+                    boundaries = category.get_boundaries(ds_id, item['col'], item['label'])
+                    p.match(and_(document.get_field(item['key']) >= boundaries[0],
+                                 document.get_field(item['key']) < boundaries[1]))
+        if pipeline0:
+            p.lookup(ds[ds_id], foreign_field='_id', local_field='_id', as_='literal_values') \
+                .project(*list(item['key'] for item in pipeline1), liteal_value=document.literal_values[0]) \
+                .project(*list(item['key'] for item in pipeline1),
+                         **dict((item['key'], document.literal_value.get_field(item['col'])) for item in pipeline0))
 
     # make group by all items with action="group",
     # and fields with all items with action="accumulate"
@@ -105,32 +139,59 @@ def visualize_ds(ds_id):
     for i in reversed(range(len(pipeline))):
         item = pipeline[i]
         action = item['action']
-        key = item.get('key', 'f%i' % i)
+        key = item['key']
         col = item.get('col')
         if action == 'accumulate':
             accumulator = item.get('accumulater')
             if accumulator == 'count':
                 fields[key] = sum_(1)
-            elif accumulator == 'average':
-                fields[key] = avg(document.get_field(col))
+            elif accumulator == 'avg' or accumulator == 'average':
+                fields[key] = avg(document.get_field(key))
+            elif accumulator == 'median':
+                fields[key] = median(document.get_field(key))
             elif accumulator == 'min':
-                fields[key] = min_(document.get_field(col))
+                fields[key] = min_(document.get_field(key))
             elif accumulator == 'max':
-                fields[key] = max_(document.get_field(col))
+                fields[key] = max_(document.get_field(key))
             else:
                 logger.warn("Accumulator %s not implemented, skip %s" % (accumulator, key))
-                fields[key] = None
         elif action == 'group':
+            field = reference.get_field(key)
             if i:
-                _id = dict_(**dict((item1['col'], reference.get_field(item1['col'])) for item1 in pipeline[:i + 1]))
+                # make a nested group
+                _id = dict_(**dict((item1['key'], reference.get_field(item1['key']))
+                                   for item1 in pipeline[:i + 1]))
+                p.group(_id, **fields)
                 reference = document._id
+                fields = {key: push_(dict_(_id=reference.get_field(key),
+                                           **dict((key1, document.get_field(key1)) for key1 in fields.keys())))}
+            elif item.get('reducer'):
+                # make a group by ranges
+                # todo combine it with multi-level
+                category = Category.by_label(item.get('label'))
+                if not category:
+                    raise Exception(f"Reducer can be applied only within known categories: "
+                                    f"{Category.__map__.keys()}. Got {repr(item.get('label'))} instead.")
+                ranges = category.get_ranges(ds_id, col, item.get('reducer'))
+                if not ranges:
+                    raise Exception(f"No ranges for {field._name}!")
+                lowbond = [range[0] for range, _ in ranges]
+                lowbond.append(ranges[-1][0][1])
+                p.facet(bucket=aggregate().bucket(field, lowbond, 'outliers', **fields)) \
+                    .add_fields(range=(dict_(_id=dict_(name=range_name, range=range),
+                                             value=filter_(lambda f: f._id == range[0], document.bucket)[0])
+                                       for range, range_name in ranges)) \
+                    .unwind(document.range) \
+                    .replace_root(document.range)\
+                    .project(**dict((key1, document.value.get_field(key1)) for key1 in fields.keys()))
             elif col:
-                _id = reference.get_field(col)
+                # make a final group of the multi-level grouping or an only group in the single-level grouping
+                _id = field
+                p.group(_id, **fields)
             else:
+                # make a single group (all-rows aggregation)
                 _id = None
-            p.group(_id, **fields)
-            fields = {col: push_(dict_(_id=reference.get_field(col),
-                                       **dict((key1, document.get_field(key1)) for key1 in fields.keys())))}
+                p.group(_id, **fields)
         else:
             logger.warn("Action %s not implemented, skip" % action)
 
@@ -157,7 +218,8 @@ def filter_ds(ds_id):
     query_labeled = [item for item in query if 'label' in item]
     query_raw = [item for item in query if 'label' not in item]
 
-    def parse_predicate(predicate: Optional[dict], arg: mongomoron.mongomoron.Expression) -> Optional[mongomoron.mongomoron.Expression]:
+    def parse_predicate(predicate: Optional[dict], arg: mongomoron.mongomoron.Expression) -> Optional[
+        mongomoron.mongomoron.Expression]:
         # parse JSON predicate into expression
         if not predicate:
             logger.warn("Predicate is empty")
@@ -167,6 +229,22 @@ def filter_ds(ds_id):
             expr = arg == predicate['value']
         elif predicate['op'] == 'in':
             expr = arg.in_(predicate['values'])
+        elif predicate['op'] == 'inrange':
+            expr = and_(arg >= predicate['range_min'], arg < predicate['range_max'])
+        elif predicate['op'] == 'gt':
+            expr = arg > predicate['value']
+        elif predicate['op'] == 'gte':
+            expr = arg >= predicate['value']
+        elif predicate['op'] == 'lt':
+            expr = arg < predicate['value']
+        elif predicate['op'] == 'lte':
+            expr = arg <= predicate['value']
+        elif predicate['op'] == 'or':
+            expr = or_(*[parse_predicate(expr1, arg) for expr1 in predicate['expression']])
+        elif predicate['op'] == 'and':
+            expr = and_(*[parse_predicate(expr1, arg) for expr1 in predicate['expression']])
+        elif predicate['op'] == 'not':
+            expr = not_(parse_predicate(predicate['expression'], arg))
         else:
             logger.warn("Predicate operation %s not implemented" % predicate['op'])
             expr = None
@@ -193,7 +271,7 @@ def filter_ds(ds_id):
         # use aggregate instead of query here to have the same interface
         p = aggregate(ds[ds_id])
     else:
-        p.lookup(ds[ds_id], local_field='row', foreign_field='_id', as_='row_data')\
+        p.lookup(ds[ds_id], local_field='row', foreign_field='_id', as_='row_data') \
             .replace_root(document.row_data[0])
 
     for item in query_raw:
@@ -207,18 +285,23 @@ def filter_ds(ds_id):
 
 @app.route('/ds/<ds_id>/label-values')
 def get_label_values(ds_id):
+    """
+    That is helper function to retrieve filter values.
+    @deprecated use `filtering` field of DS list items instead
+    @param ds_id:
+    @return:
+    """
     if not _has_access(ds_id):
         return _list_response([])
 
     col = request.args['col']
     label = request.args['label']
 
-    p = aggregate(ds_classification[ds_id])\
-        .match(document.col == col)\
-        .project(v=document.details.get_field(label))\
-        .group(None, vv=mongomoron.push_unique(document.v))
+    category = Category.get(label)
+    if category:
+        return _list_response(category.get_values(ds_id, col))
 
-    return _list_response(list(conn.execute(p))[0]['vv'])
+    return error(Exception(f'For {label} we have no known method of getting values'))
 
 
 @conn.transactional
@@ -253,7 +336,7 @@ def _process_ds(ds_id):
         if not future.exception():
             call_get_details_for_all_cols(ds_id)
 
-    call_classify_cells(ds_id, PatternClassifier()) \
+    call_classify_cells(ds_id, SequenceClassifier.get()) \
         .add_done_callback(on_classify_done)
 
 
