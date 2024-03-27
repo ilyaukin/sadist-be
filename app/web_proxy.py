@@ -1,4 +1,5 @@
 import asyncio
+import json
 import socket
 import time
 from asyncio import Future, Task
@@ -33,7 +34,7 @@ class BrowserSlot(object):
 
     def __init__(self, host: str, port: int):
         self.host = host
-        self.port = port
+        self.port = int(port)
         self.free = True
         self.browser = None
         self.page = None
@@ -293,9 +294,121 @@ async def goto(session_id, url):
     @return: HTML response
     """
     timeout = int(request.args.get('timeout', 10))
+    options = json.loads(request.args.get('options', 'null'))
     slot = pool[session_id]
-    response = await _open_page(slot, session_id, url, timeout, sessionless=False)
+    response = await _open_page(slot, session_id, url, timeout, sessionless=False, options=options)
     return response
+
+
+@app.route('/proxy/<session_id>/go-back', methods=['GET'])
+async def go_back(session_id):
+    timeout = int(request.args.get('timeout', 10))
+    options = json.loads(request.args.get('options', 'null'))
+    slot = pool[session_id]
+    page = slot.page
+    await page.goBack(options, timeout=1000 * timeout)
+    await _patch(page, session_id, sessionless=False)
+    content = await page.content()
+    headers = await slot.interceptor.get_response_headers(page.url, timeout=timeout)
+    return _make_response(content, headers)
+
+
+@app.route('/proxy/<session_id>/go-forward', methods=['GET'])
+async def go_forward(session_id):
+    timeout = int(request.args.get('timeout', 10))
+    options = json.loads(request.args.get('options', 'null'))
+    slot = pool[session_id]
+    page = slot.page
+    await page.goForward(options, timeout=1000 * timeout)
+    await _patch(page, session_id, sessionless=False)
+    content = await page.content()
+    headers = await slot.interceptor.get_response_headers(page.url, timeout=timeout)
+    return _make_response(content, headers)
+
+
+@app.route('/proxy/<session_id>/reload', methods=['GET'])
+async def reload(session_id):
+    timeout = int(request.args.get('timeout', 10))
+    options = json.loads(request.args.get('options', 'null'))
+    slot = pool[session_id]
+    page = slot.page
+    await page.reload(options, timeout=1000 * timeout)
+    await _patch(page, session_id, sessionless=False)
+    content = await page.content()
+    headers = await slot.interceptor.get_response_headers(page.url, timeout=timeout)
+    return _make_response(content, headers)
+
+
+@app.route('/proxy/<session_id>/authenticate', methods=['POST'])
+async def authenticate(session_id):
+    credentials = request.get_json()
+    slot = pool[session_id]
+    page = slot.page
+    await page.authenticate(credentials)
+    return {'success': True}
+
+
+@app.route('/proxy/<session_id>/set-bypass-csp', methods=['POST'])
+async def set_bypass_csp(session_id):
+    enabled = request.get_json()
+    slot = pool[session_id]
+    page = slot.page
+    await page.setBypassCSP(enabled)
+    return {'success': True}
+
+
+@app.route('/proxy/<session_id>/set-cache-enabled', methods=['POST'])
+async def set_cache_enabled(session_id):
+    enabled = request.get_json()
+    slot = pool[session_id]
+    page = slot.page
+    await page.setCacheEnabled(enabled)
+    return {'success': True}
+
+
+@app.route('/proxy/<session_id>/set-extra-http-headers', methods=['POST'])
+async def set_extra_http_headers(session_id):
+    headers = request.get_json()
+    slot = pool[session_id]
+    page = slot.page
+    await page.setExtraHTTPHeaders(headers)
+    return {'success': True}
+
+
+@app.route('/proxy/<session_id>/set-javascript-enabled', methods=['POST'])
+async def set_javascript_enabled(session_id):
+    enabled = request.get_json()
+    slot = pool[session_id]
+    page = slot.page
+    await page.setJavaScriptEnabled(enabled)
+    return {'success': True}
+
+
+@app.route('/proxy/<session_id>/set-offline-mode', methods=['POST'])
+async def set_offline_mode(session_id):
+    enabled = request.get_json()
+    slot = pool[session_id]
+    page = slot.page
+    await page.setOfflineMode(enabled)
+    return {'success': True}
+
+
+@app.route('/proxy/<session_id>/set-user-agent', methods=['POST'])
+async def set_user_agent(session_id):
+    user_agent = request.get_json()
+    slot = pool[session_id]
+    page = slot.page
+    await page.setUserAgent(user_agent)
+    return {'success': True}
+
+
+@app.route('/proxy/<session_id>/set-viewport', methods=['POST'])
+async def set_viewport(session_id):
+    viewport = request.get_json()
+    slot = pool[session_id]
+    page = slot.page
+    await page.setViewport(viewport)
+    return {'success': True}
 
 
 @app.route('/proxy/<session_id>/ref/<path:url>', methods=['GET'])
@@ -315,9 +428,9 @@ async def ref(session_id, url):
     return _make_response(body, headers)
 
 
-async def _open_page(slot, session_id, url, timeout, sessionless=True):
+async def _open_page(slot, session_id, url, timeout, sessionless=True, options=None):
     page = slot.page
-    await page.goto(url, timeout=1000 * timeout)
+    await page.goto(url, options, timeout=1000 * timeout)
     await _patch(page, session_id, sessionless)
     html_content = await page.content()
     headers = await slot.interceptor.get_response_headers(url, timeout=timeout)
