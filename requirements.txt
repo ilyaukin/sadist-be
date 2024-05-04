@@ -1,6 +1,5 @@
 aiohttp==3.8.5
 aiosignal==1.3.1
-appdirs==1.4.4
 asgiref==3.3.4
 astor==0.8.1
 async-timeout==4.0.3
@@ -30,11 +29,9 @@ multidict==6.0.4
 numpy==1.26.4
 psutil==5.9.5
 pycparser==2.21
-pyee==8.2.2
 pyjsparser==2.7.1
 PyJWT==2.4.0
 pymongo==4.6.1
-pyppeteer==1.0.2
 python-crfsuite==0.9.10
 python-dateutil==2.9.0.post0
 requests==2.31.0
@@ -43,12 +40,10 @@ scipy==1.12.0
 six==1.16.0
 threadpoolctl==3.3.0
 torequests==6.0.0
-tqdm==4.65.0
 typing_extensions==4.7.1
 urllib3==1.26.16
 uvicorn==0.23.2
 websocket-client==1.6.1
-websockets==10.4
 Werkzeug==2.3.6
 wrapt==1.11.1
 yarl==1.9.2

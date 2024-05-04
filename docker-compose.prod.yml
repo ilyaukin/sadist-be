@@ -32,7 +32,11 @@ services:
       - certbot_www:/var/www/certbot/
       - ssl_certs:/etc/letsencrypt/
 
-  proxy1:
+  proxy:
+    networks:
+      - backend-network
+
+  chrome1:
     networks:
       - backend-network
 

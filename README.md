@@ -39,6 +39,19 @@ MacOS: [Instruction](https://medium.com/@OndrejKvasnovsky/mongodb-replica-set-on
 (TODO: make a script)
 
 
+### nginx
+
+If you are running solo backend application, you can skip nginx
+installation and use the app serving at default Uvicorn's port 8000.
+
+However, to run web crawler, for instance, `sadist-proxy` service
+is needed. So nginx should be configured like in prod.
+
+TODO: since we now have >1 service, and likely will have more in the
+future, it worth to standardize configuration for all Docker,
+nginx, MongoDB, and all services for all environments.
+
+
 ## Environments
 
 Environments in docker are parameterized by multiple compose files ([see the docs](https://docs.docker.com/compose/extends/)).

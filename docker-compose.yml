@@ -16,8 +16,17 @@ services:
       dockerfile: Dockerfile-nginx
     depends_on:
       - flask
+      - proxy
 
-  proxy1:
+  proxy:
+    image: webapp-proxy
+    build:
+      context: ../sadist-proxy
+      dockerfile: Dockerfile-proxy
+    environment:
+      - ENV
+
+  chrome1:
     image: alpeware/chrome-headless-trunk
     volumes:
       - /tmp/chromedata:/data
