@@ -47,35 +47,11 @@ installation and use the app serving at default Uvicorn's port 8000.
 However, to run web crawler, for instance, `sadist-proxy` service
 is needed. So nginx should be configured like in prod.
 
-TODO: since we now have >1 service, and likely will have more in the
-future, it worth to standardize configuration for all Docker,
-nginx, MongoDB, and all services for all environments.
 
+## Environments, deployment, CI/CD
 
-## Environments
-
-Environments in docker are parameterized by multiple compose files ([see the docs](https://docs.docker.com/compose/extends/)).
-- [`docker-compose.yml`](docker-compose.yml) is the base configuration.
-- [`docker-compose.dev.yml`](docker-compose.dev.yml) - configuration for dev environment.
-It runs the app on 0.0.0.0:80.
-You can launch it by execution
-```shell
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-```
-- [`docker-compose.prod.yml`](docker-compose.prod.yml) - configuration for prod. Beside of the app, it contains a network
-for the blog served by the same nginx, which is maintained outside of this project.
-You can launch it by
-```shell
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
-```
-- [`docker-compose.staging.yml`](docker-compose.staging.yml) - configuration for staging.
-You can launch it by
-```shell
-export COMPOSE_PROJECT_NAME=staging && docker compose -f docker-compose.yml -f docker-compose.staging.yml up --build
-```
-The env variable is needed in order not to mess up with prod containers. 
-The app is run on 0.0.0.0:8080
-
+Deployment to staging/prod is done by docker compose.
+Configuration is in the [sadist-ci](https://github.com/ilyaukin/sadist-ci) repo.
 
 ## Tests
 
