@@ -34,12 +34,12 @@ git push origin --tags
 ### copy a certain collection from local to prod
 ```shell
 mongodump -d sadist -c <collection name> -o sadist-dump
-mongorestore -u kzerby -p <password> -d sadist "mongodb+srv://cluster0.w7o97.mongodb.net/" sadist-dump/sadist/
+mongorestore -u kzerby -p <password> -d sadist "mongodb+srv://cluster1.yoka1fj.mongodb.net/" sadist-dump/sadist/
 ```
 
 ### run script on a remote container
 ```shell
-eval $(docker-machine env my-handicapped-pet)
+export DOCKER_HOST=ssh://ec2-user@ec2-54-201-237-197.us-west-2.compute.amazonaws.com
 export 'DATABASE_URL=<copy connection from atlas, put password and database>'
-docker run -it -e DATABASE_URL webapp-flask-staging python -m scripts.classification --help
+docker run -it -e DATABASE_URL myhandicappedpet/webapp-flask python -m scripts.classification --help
 ```
