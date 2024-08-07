@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>My handicapped pet</title>
     <script type="application/javascript" src="{{ url_for('static', filename='react.js') }}"></script>
+    <script type="application/javascript" src="{{ url_for('static', filename='xlsx.js') }}"></script>
     {% if data %}
     <script type="application/javascript">
         window.data = {{ data|tojson }}
