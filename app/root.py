@@ -82,7 +82,8 @@ def get_ds(ds_id):
     if not _has_access(ds_id):
         return _list_response([])
 
-    return _list_response(conn.execute(query(ds[ds_id])))
+    return _list_response(conn.execute(query(ds[ds_id])
+                                       .sort((document._id, pymongo.ASCENDING))))
 
 
 @app.route('/ds/<ds_id>/visualize')
@@ -280,6 +281,7 @@ def filter_ds(ds_id):
         if expr:
             p.match(expr)
 
+    p.sort((document._id, pymongo.ASCENDING));
     return _list_response(conn.execute(p))
 
 
