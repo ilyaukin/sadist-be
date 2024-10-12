@@ -24,7 +24,7 @@ itsdangerous==2.1.2
 Jinja2==3.1.2
 joblib==1.3.2
 MarkupSafe==2.1.3
-mongomoron==0.2
+mongomoron==0.4
 multidict==6.0.4
 numpy==1.26.4
 psutil==5.9.5

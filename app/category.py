@@ -4,11 +4,10 @@ from dataclasses import dataclass
 from numbers import Number
 from typing import Dict, Union, Optional, Any, List, Iterable, Tuple
 
-import mongomoron.mongomoron
 import pymongo
 from bson import ObjectId
 from dateutil.relativedelta import relativedelta
-from mongomoron import document, aggregate, cond, dict_, min_, max_, percentile
+from mongomoron import *
 
 from db import geo_city, geo_country, ds_classification, conn
 from serializer import DO
@@ -170,8 +169,8 @@ class Category(SingletonMixin):
         ff = label.split('.')
         return Category.get(ff[0])
 
-    def join(self, p: mongomoron.mongomoron.AggregationPipelineBuilder,
-             local_field: mongomoron.mongomoron.Field) -> mongomoron.mongomoron.AggregationPipelineBuilder:
+    def join(self, p: AggregationPipelineBuilder,
+             local_field: Field) -> AggregationPipelineBuilder:
         """
         In an aggregation pipeline, join data corresponding to the category
         @param p: Pipeline
@@ -183,9 +182,9 @@ class Category(SingletonMixin):
         return p
 
     @staticmethod
-    def join_by_dict(p: mongomoron.mongomoron.AggregationPipelineBuilder,
-                     local_field: mongomoron.mongomoron.Field,
-                     collection: mongomoron.Collection,
+    def join_by_dict(p: AggregationPipelineBuilder,
+                     local_field: Field,
+                     collection: Collection,
                      d: Dict[str, str]):
         """
         Common implementation `join` by dictionary collection
@@ -396,8 +395,8 @@ class DatetimeCategory(Category):
 
 @Category.sub('city')
 class CityCategory(Category):
-    def join(self, p: mongomoron.mongomoron.AggregationPipelineBuilder,
-             local_field: mongomoron.mongomoron.Field) -> mongomoron.mongomoron.AggregationPipelineBuilder:
+    def join(self, p: AggregationPipelineBuilder,
+             local_field: Field) -> AggregationPipelineBuilder:
         return self.join_by_dict(p, local_field, geo_city, dict(id='_id', name='name', loc='loc'))
 
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
@@ -423,8 +422,8 @@ class CityCategory(Category):
 
 @Category.sub('country')
 class CountryCategory(Category):
-    def join(self, p: mongomoron.mongomoron.AggregationPipelineBuilder,
-             local_field: mongomoron.mongomoron.Field) -> mongomoron.mongomoron.AggregationPipelineBuilder:
+    def join(self, p: AggregationPipelineBuilder,
+             local_field: Field) -> AggregationPipelineBuilder:
         return self.join_by_dict(p, local_field, geo_country, dict(id='_id', name='name', loc='loc'))
 
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:

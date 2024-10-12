@@ -4,14 +4,10 @@ import json
 from concurrent.futures._base import Future
 from typing import Union, Iterable, Optional
 
-import mongomoron.mongomoron
 import pymongo
 from bson import ObjectId
 from flask import render_template, request, session
-from mongomoron import insert_many, query, document, aggregate, push_, \
-    list_, dict_, filter_, and_, update_one, insert_one, query_one, \
-    or_, not_, switch, avg, sum_, min_, max_, median
-from mongomoron.mongomoron import Expression
+from mongomoron import *
 
 from app import app, logger
 from category import Category
@@ -82,7 +78,8 @@ def get_ds(ds_id):
     if not _has_access(ds_id):
         return _list_response([])
 
-    return _list_response(conn.execute(query(ds[ds_id])))
+    return _list_response(conn.execute(query(ds[ds_id])
+                                       .sort((document._id, pymongo.ASCENDING))))
 
 
 @app.route('/ds/<ds_id>/visualize')
@@ -218,8 +215,7 @@ def filter_ds(ds_id):
     query_labeled = [item for item in query if 'label' in item]
     query_raw = [item for item in query if 'label' not in item]
 
-    def parse_predicate(predicate: Optional[dict], arg: mongomoron.mongomoron.Expression) -> Optional[
-        mongomoron.mongomoron.Expression]:
+    def parse_predicate(predicate: Optional[dict], arg: Expression) -> Optional[Expression]:
         # parse JSON predicate into expression
         if not predicate:
             logger.warn("Predicate is empty")
@@ -250,7 +246,7 @@ def filter_ds(ds_id):
             expr = None
         return expr
 
-    p: Optional[mongomoron.mongomoron.AggregationPipelineBuilder] = None
+    p: Optional[AggregationPipelineBuilder] = None
     for item in query_labeled:
         if not p:
             p = aggregate(ds_classification[ds_id]) \
@@ -280,6 +276,7 @@ def filter_ds(ds_id):
         if expr:
             p.match(expr)
 
+    p.sort((document._id, pymongo.ASCENDING));
     return _list_response(conn.execute(p))
 
 
