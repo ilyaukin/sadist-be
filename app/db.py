@@ -1,9 +1,10 @@
+import datetime
 import os
 from typing import Union
 
 import gridfs
 import pymongo
-from mongomoron import DatabaseConnection, Collection
+from mongomoron import DatabaseConnection, Collection, Operation
 from pymongo.database import Database
 
 
@@ -12,7 +13,7 @@ class SadistDatabaseConnection(DatabaseConnection):
                    'mongodb://127.0.0.1:27017,127.0.0.1:27018/sadist?replicaSet=rs0'
 
     def __init__(self):
-        super().__init__(None, None)
+        super().__init__()
         self.mongo_client_pool = dict()
 
     def mongo_client(self):
@@ -74,6 +75,21 @@ app_db_migration = Collection('app_db_migration')
 
 wc_proxy = Collection('wc_proxy')
 wc_script_template = Collection('wc_script_template')
+
+
+@conn.add_hook(Operation.INSERT, [ds_list])
+def hook_insert(documents: list[dict]):
+    now = datetime.datetime.now()
+    for document in documents:
+        document.setdefault('_createdAt', now)
+        document.setdefault('_updatedAt', now)
+
+
+@conn.add_hook(Operation.UPDATE, [ds_list])
+def hook_update(filter: dict, update: dict):
+    now = datetime.datetime.now()
+    update.setdefault('$set', {})
+    update['$set']['_updatedAt'] = now
 
 
 def replace_grid_file(data: bytes, filename: str):

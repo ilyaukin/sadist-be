@@ -390,6 +390,13 @@ def client():
 
 
 def assert_list_elements_equal(expected: Iterable, actual: Iterable, msg: Any = None):
+    # remove _createAt and _updatedAt since they aren't relevant
+    for item in actual:
+        if '_createdAt' in item:
+            del item['_createdAt']
+        if '_updatedAt' in item:
+            del item['_updatedAt']
+
     case = TestCase()
     case.maxDiff = None
     case.assertCountEqual(expected, actual, msg)
