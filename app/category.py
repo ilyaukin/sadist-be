@@ -90,23 +90,49 @@ class RangeReducer(DO):
 
 
 @dataclass
-class VizProps(DO):
+class AccumulateProps(DO):
+    action = 'accumulate'
     col: str
     label: Optional[str]
-    action: str
-    predicate: Predicate = None
+    predicate: Optional[Predicate] = None
     accumulater: Optional[str] = None
-    reducer: Union[RangeReducer] = None
 
 
 @dataclass
-class Visualization(DO):
+class GroupProps(DO):
+    action = 'group'
+    col: str
+    label: Optional[str]
+    predicate: Optional[Predicate] = None
+    reducer: Optional[RangeReducer] = None
+
+
+VizProps = Union[AccumulateProps, GroupProps]
+
+
+@dataclass
+class VizBaseMeta(DO):
     key: str
+    stringrepr: Optional[str]
+
+
+@dataclass
+class VizGraphMeta(VizBaseMeta):
     type: str
-    props: VizProps
-    stringrepr: str
-    labelselector: str = None
-    children: Optional[Dict[str, 'Visualization']] = None
+    props: GroupProps
+    children: Dict[str, 'VizMeta']
+    labelselector: Optional[str] = None
+
+
+@dataclass
+class VizPointMeta(VizBaseMeta):
+    props: AccumulateProps
+
+
+VizMeta = Union[VizGraphMeta, VizPointMeta]
+
+
+Visualization = VizMeta
 
 
 @dataclass
@@ -329,17 +355,17 @@ class Category(SingletonMixin):
 @Category.sub('datetime')
 class DatetimeCategory(Category):
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
-        return [Visualization(
+        return [VizGraphMeta(
             key=f'{col} timeline',
+            stringrepr='Show timeline',
             type='histogram',
-            props=VizProps(
-                action='group',
+            props=GroupProps(
                 col=col,
                 label='datetime.timestamp',
                 reducer=RangeReducer()
             ),
-            stringrepr='Show timeline',
             labelselector='id.name',
+            children={},
         )]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
@@ -400,12 +426,13 @@ class CityCategory(Category):
         return self.join_by_dict(p, local_field, geo_city, dict(id='_id', name='name', loc='loc'))
 
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
-        return [Visualization(
+        return [VizGraphMeta(
             key=f'{col} city',
-            type='globe',
-            props=VizProps(action='group', col=col, label='city'),
             stringrepr='Show cities',
-            labelselector='id.name'
+            type='globe',
+            props=GroupProps(col=col, label='city'),
+            labelselector='id.name',
+            children={},
         )]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
@@ -427,12 +454,13 @@ class CountryCategory(Category):
         return self.join_by_dict(p, local_field, geo_country, dict(id='_id', name='name', loc='loc'))
 
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
-        return [Visualization(
+        return [VizGraphMeta(
             key=f'{col} country',
+            stringrepr='Show counties',
             type='globe',
-            props=VizProps(action='group', col=col, label='country'),
-            stringrepr='Show countries',
-            labelselector='id.name'
+            props=GroupProps(col=col, label='country'),
+            labelselector='id.name',
+            children={},
         )]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
@@ -450,22 +478,21 @@ class CountryCategory(Category):
 @Category.sub('number')
 class NumberCategory(Category):
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
-        return [Visualization(
+        return [VizPointMeta(
             key=f'{col} average',
-            type='bar',
-            props=VizProps(action='accumulate', col=col, label='number', accumulater='avg'),
             stringrepr='Show average',
-        ), Visualization(
+            props=AccumulateProps(col=col, label='number', accumulater='avg'),
+        ), VizPointMeta(
             key=f'{col} median',
-            type='bar',
-            props=VizProps(action='accumulate', col=col, label='number', accumulater='median'),
             stringrepr='Show median',
-        ), Visualization(
+            props=AccumulateProps(col=col, label='number', accumulater='median'),
+        ), VizGraphMeta(
             key=f'{col} distribution',
-            type='histogram',
-            props=VizProps(action='group', col=col, label='number', reducer=RangeReducer()),
             stringrepr='Show distribution',
+            type='histogram',
+            props=GroupProps(col=col, label='number', reducer=RangeReducer()),
             labelselector='id.name',
+            children={},
         )]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
@@ -508,12 +535,13 @@ class MoneyCategory(NumberCategory):
 @Category.sub('gender')
 class GenderCategory(Category):
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
-        return [Visualization(
+        return [VizGraphMeta(
             key=f'{col} gender',
-            type='histogram',
-            props=VizProps(action='group', col=col, label='gender'),
             stringrepr='Show distribution',
+            type='histogram',
+            props=GroupProps(col=col, label='gender'),
             labelselector='id',
+            children={},
         )]
 
     def get_filtering(self, ds_list_record: dict, col: str) -> List[Filtering]:
