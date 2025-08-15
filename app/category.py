@@ -479,6 +479,14 @@ class CountryCategory(Category):
 class NumberCategory(Category):
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
         return [VizPointMeta(
+            key=f'{col} minimum',
+            stringrepr='Show minimum',
+            props=AccumulateProps(col=col, label='number', accumulater='min'),
+        ),VizPointMeta(
+            key=f'{col} maximum',
+            stringrepr='Show maximum',
+            props=AccumulateProps(col=col, label='number', accumulater='max'),
+        ),VizPointMeta(
             key=f'{col} average',
             stringrepr='Show average',
             props=AccumulateProps(col=col, label='number', accumulater='avg'),
