@@ -66,8 +66,6 @@ dl_currency = Collection('dl_currency')
 dl_seq = Collection('dl_seq')
 dl_seq_label = Collection('dl_seq_label')
 
-nn_model = Collection('nn_model')
-
 app_config = Collection('app_config')
 app_user = Collection('app_user')
 app_user_session = Collection('app_user_session')
