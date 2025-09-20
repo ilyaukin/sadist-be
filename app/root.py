@@ -280,27 +280,6 @@ def filter_ds(ds_id):
     return _list_response(conn.execute(p))
 
 
-@app.route('/ds/<ds_id>/label-values')
-def get_label_values(ds_id):
-    """
-    That is helper function to retrieve filter values.
-    @deprecated use `filtering` field of DS list items instead
-    @param ds_id:
-    @return:
-    """
-    if not _has_access(ds_id):
-        return _list_response([])
-
-    col = request.args['col']
-    label = request.args['label']
-
-    category = Category.get(label)
-    if category:
-        return _list_response(category.get_values(ds_id, col))
-
-    return error(Exception(f'For {label} we have no known method of getting values'))
-
-
 @conn.transactional
 def _add_ds(ds_id, csv_file):
     old_record = _get_ds_list_active_record(csv_file.filename)
