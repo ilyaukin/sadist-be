@@ -30,7 +30,7 @@ class SadistDatabaseConnection(DatabaseConnection):
         return gridfs.GridFS(self.db())
 
     def _new_client(self) -> pymongo.MongoClient:
-        return pymongo.MongoClient(SadistDatabaseConnection.DATABASE_URL, socketTimeoutMS=30000)
+        return pymongo.MongoClient(SadistDatabaseConnection.DATABASE_URL, socketTimeoutMS=30000, authSource='admin')
 
 
 conn = SadistDatabaseConnection()
