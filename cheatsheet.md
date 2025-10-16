@@ -43,3 +43,13 @@ export DOCKER_HOST=ssh://ec2-user@ec2-54-201-237-197.us-west-2.compute.amazonaws
 export 'DATABASE_URL=<copy connection from atlas, put password and database>'
 docker run -it -e DATABASE_URL myhandicappedpet/webapp-flask python -m scripts.classification --help
 ```
+
+### docker port forwarding
+it should be put before start docker in `main.tf`, but not doing it for now because
+I don't want instance re-creation
+
+```shell
+sudo mkdir -p /etc/systemd/system/docker.service.d/
+echo -e "[Service]\nExecStart=\nExecStart=/usr/bin/dockerd -H unix:///var/run/docker.sock -H tcp://127.0.0.1:23750 --containerd=/run/containerd/containerd.sock" | sudo tee /etc/systemd/system/docker.service.d/override.conf
+sudo systemctl daemon-reload
+```
