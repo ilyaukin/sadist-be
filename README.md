@@ -48,10 +48,92 @@ However, to run web crawler, for instance, `sadist-proxy` service
 is needed. So nginx should be configured like in prod.
 
 
-## Environments, deployment, CI/CD
+## Deployment
 
 Deployment to staging/prod is done by docker compose.
-Configuration is in the [sadist-ci](https://github.com/ilyaukin/sadist-ci) repo.
+Configuration is in the [sadist-ci](https://github.com/my-handicapped-pet/sadist-ci) repo.
+
+
+### Environments
+
+Prod and staging are hosted at the same AWS EC2 instance. To separate,
+compose project is used. Staging is mapped to :8080, :8043 ports.
+
+
+### Deployment via docker compose locally
+
+1. Build all images that need to be updated. E.g., for webapp-flask:
+```shell
+docker build -f Dockerfile-flask -t myhandicappedpet/webapp-flask .
+docker tag myhandicappedpet/webapp-flask myhandicappedpet/webapp-flask:latest
+```
+2. Create volumes `prod_certbot_data`, `prod_ssl_certs` and copy certs from 
+the prod. This has to be done once a while per a developer machine, while
+the certs are valid.
+  - Create volumes:
+  ```shell
+  docker volume create prod_certbot_www
+  docker volume create prod_ssl_certs
+  ```
+  - SSH to the prod. Copy prod certs to /tmp and give permissions:
+  ```shell
+  mkdir /tmp/certs
+  sudo cp -r /var/lib/docker/volumes/prod_ssl_certs/_data/archive/my-handicapped-pet.io /tmp/certs/
+  sudo chown -R ec2-user:ec2-user /tmp/certs/
+  ```
+  - Locally, copy certs from the remote and create symlinks:
+  ```shell
+  scp -r  ec2-user@my-handicapped-pet.io:/tmp/certs/my-handicapped-pet.io/ /tmp/
+  sudo mkdir  /var/lib/docker/volumes/prod_ssl_certs/_data/archive
+  sudo mkdir  /var/lib/docker/volumes/prod_ssl_certs/_data/live
+  sudo mkdir  /var/lib/docker/volumes/prod_ssl_certs/_data/live/my-handicapped-pet.io
+  sudo -i
+  cd /var/lib/docker/volumes/prod_ssl_certs/_data/live/my-handicapped-pet.io/
+  # change number if needed
+  ln -s ../../archive/my-handicapped-pet.io/cert8.pem cert.pem
+  ln -s ../../archive/my-handicapped-pet.io/chain8.pem chain.pem
+  ln -s ../../archive/my-handicapped-pet.io/fullchain8.pem fullchain.pem
+  ln -s ../../archive/my-handicapped-pet.io/privkey8.pem privkey.pem
+  ```
+  - In the prod, remove /tmp certs:
+  ```shell
+  rm -rf /tmp/certs/
+  ```
+3. Edit `/etc/hosts` to point my-handicapped-pet.io to localhost.
+4. The next steps must be done in the sadist-ci repo which contains compose
+configuration (I just keep all instructions here in one place).
+5. Export .env with the secrets used for blog app now. (Further we may want
+to improve the deployment by using common mechanism for providing all services
+with env, as well as service monitoring, scaling, restarting and re-configuring
+on fly, but for now it's a little bit specific for each service)
+```shell
+echo -e '<the secret secret>' > .env
+```
+6. Export proper environment variables. Run with .dev compose file.
+```shell
+export ENV=dev
+export DATABASE_URL=mongodb://root:password@mongo:27017/sadist
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+7. Import DB, this also has to be done once a while.
+```shell
+docker run -it --network sadist-ci_default -v <path to the dump>:/dump mongo:latest mongorestore -d sadist --authenticationDatabase admin mongodb://root:password@mongo:27017/ /dump
+```
+8. To shut down, run
+```shell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+```
+
+
+### CI/CD
+
+Deployment to staging is triggered by push to `develop`. Each repo triggers
+the same workflow in sadist-ci, but with different list of images to rebuild.
+Results, however, will be under Actions in the corresponding repo.
+
+Deployment to prod is triggered manually always from sadist-ci. After deployment,
+code is automatically merged to `master`.
+
 
 ## Tests
 
