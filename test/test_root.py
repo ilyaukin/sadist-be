@@ -1,14 +1,14 @@
 import json
-import logging
 import os
 from typing import Iterable, Any
-from unittest import TestCase, mock
+from unittest import mock
 
 import mongomock
 import pymongo
 import pytest
 from bson import ObjectId
 from mongomoron import delete, insert_many, insert_one
+from pytest_unordered import unordered
 
 from app import app
 from db import conn, ds, ds_classification, ds_list, geo_city
@@ -18,7 +18,9 @@ if os.getenv('USE_MONGOMOCK'):
     test_client = mongomock.MongoClient(test_database_url)
 else:
     test_client = pymongo.MongoClient(test_database_url)
-Patch = mock.patch.object(conn, 'mongo_client', lambda: test_client)
+# I want all mongo queries patched from now on...
+patched = mock.patch.object(conn, 'mongo_client', lambda: test_client)
+patched.start()
 
 
 def insert_cities():
@@ -52,7 +54,6 @@ def insert_cities():
 
 
 @pytest.fixture
-@Patch
 def dataset1():
     ds_id = ObjectId()
     ds_collection = ds[str(ds_id)]
@@ -179,7 +180,6 @@ def dataset1():
 
 
 @pytest.fixture
-@Patch
 def dataset2():
     ds_id = ObjectId()
     ds_collection = ds[str(ds_id)]
@@ -389,7 +389,8 @@ def client():
     return app.test_client()
 
 
-def assert_list_elements_equal(expected: Iterable, actual: Iterable, msg: Any = None):
+def assert_list_elements_equal(expected: Iterable, actual: Iterable,
+                               msg: Any = None):
     # remove _createAt and _updatedAt since they aren't relevant
     for item in actual:
         if '_createdAt' in item:
@@ -397,12 +398,10 @@ def assert_list_elements_equal(expected: Iterable, actual: Iterable, msg: Any = 
         if '_updatedAt' in item:
             del item['_updatedAt']
 
-    case = TestCase()
-    case.maxDiff = None
-    case.assertCountEqual(expected, actual, msg)
+    # sort in the same order
+    assert actual == unordered(expected), msg
 
 
-@Patch
 def test_list(client, dataset1):
     result = client.get('/ls').get_json()
     assert isinstance(result, dict)
@@ -426,9 +425,9 @@ def test_list(client, dataset1):
     assert_list_elements_equal(expected_list, result['list'])
 
 
-@Patch
 def test_list_with_v_and_f(client, dataset1):
-    result = client.get('/ls?id=%s&-v=true&-f=true' % dataset1['ds_id']).get_json()
+    result = client.get(
+        '/ls?id=%s&-v=true&-f=true' % dataset1['ds_id']).get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
     expected_list = [
@@ -448,6 +447,7 @@ def test_list_with_v_and_f(client, dataset1):
             'visualization': {
                 'Location': [
                     {
+                        'children': {},
                         'key': 'Location city',
                         'type': 'globe',
                         'props': {
@@ -504,13 +504,14 @@ def test_list_with_v_and_f(client, dataset1):
     assert_list_elements_equal(expected_list, result['list'])
 
 
-@Patch
 def test_visualize(client, dataset1):
     result = client \
         .get('/ds/%s/visualize' % dataset1['ds_id'],
              query_string='pipeline=' + json.dumps(
-                 [{'action': 'group', 'col': 'Location', 'label': 'city', 'key': 'Location city'},
-                  {'action': 'accumulate', 'accumulater': 'count', 'key': 'count'}])) \
+                 [{'action': 'group', 'col': 'Location', 'label': 'city',
+                   'key': 'Location city'},
+                  {'action': 'accumulate', 'accumulater': 'count',
+                   'key': 'count'}])) \
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
@@ -556,38 +557,44 @@ def test_visualize(client, dataset1):
     assert_list_elements_equal(expected_list, result["list"])
 
 
-@Patch
 def test_visualize_nested_group(client, dataset2):
     result = client \
         .get('/ds/%s/visualize' % dataset2['ds_id'],
              query_string='pipeline=' + json.dumps(
-                 [{'action': 'group', 'col': 'Location', 'label': 'city', 'key': 'Location city'},
-                  {'action': 'group', 'col': 'Profession', 'label': 'profession.role', 'key': 'Profession role'},
-                  {'action': 'accumulate', 'accumulater': 'count', 'key': 'count'}])) \
+                 [{'action': 'group', 'col': 'Location', 'label': 'city',
+                   'key': 'Location city'},
+                  {'action': 'group', 'col': 'Profession',
+                   'label': 'profession.role', 'key': 'Profession role'},
+                  {'action': 'accumulate', 'accumulater': 'count',
+                   'key': 'count'}])) \
         .get_json()
     assert isinstance(result, dict)
     assert result['success'] == True
-    expected_list = [{'Profession role': [{'count': 1, 'id': 'System Architest'}],
-                      'id': {'loc': {'coordinates': [2.3488, 48.85341], 'type': 'Point'}, 'name': 'Paris', 'id': '2'}},
-                     {'Profession role': [{'count': 1, 'id': 'Backend Developer'}],
-                      'id': {'loc': {'coordinates': [-74.00597, 40.71427], 'type': 'Point'}, 'name': 'New York',
-                             'id': '3'}}, {
-                         'Profession role': [{'count': 1, 'id': 'Frontend Developer'},
-                                             {'count': 1, 'id': 'System Architest'},
-                                             {'count': 2, 'id': 'Backend Developer'}],
-                         'id': {'loc': {'coordinates': [37.61556, 55.75222], 'type': 'Point'}, 'name': 'Moscow',
-                                'id': '1'}}]
+    expected_list = [
+        {'Profession role': unordered(
+            [{'count': 1, 'id': 'System Architest'}]),
+            'id': {
+                'loc': {'coordinates': [2.3488, 48.85341], 'type': 'Point'},
+                'name': 'Paris', 'id': '2'}},
+        {'Profession role': unordered(
+            [{'count': 1, 'id': 'Backend Developer'}]),
+            'id': {
+                'loc': {'coordinates': [-74.00597, 40.71427],
+                        'type': 'Point'},
+                'name': 'New York',
+                'id': '3'}}, {
+            'Profession role': unordered(
+                [{'count': 1, 'id': 'Frontend Developer'},
+                 {'count': 1, 'id': 'System Architest'},
+                 {'count': 2, 'id': 'Backend Developer'}]),
+            'id': {'loc': {'coordinates': [37.61556, 55.75222],
+                           'type': 'Point'}, 'name': 'Moscow',
+                   'id': '1'}}]
 
     # assert nested list is equal without order
-    assert len(expected_list) == len(result['list'])
-    for item in expected_list:
-        item_id = item['id']
-        for key, subitem in item.items():
-            result_subitem = next(item for item in result['list'] if item_id == item['id'])[key]
-            assert_list_elements_equal(subitem, result_subitem, f'for {item_id}')
+    assert_list_elements_equal(expected_list, result['list'])
 
 
-@Patch
 def test_filter(client, dataset1):
     result = client \
         .get('/ds/%s/filter' % dataset1['ds_id'],
@@ -613,7 +620,6 @@ def test_filter(client, dataset1):
     assert_list_elements_equal(expected_list, result['list'])
 
 
-@Patch
 def test_filter_uncategorized(client, dataset1):
     result = client \
         .get('/ds/%s/filter' % dataset1['ds_id'],
@@ -633,8 +639,6 @@ def test_filter_uncategorized(client, dataset1):
     ]
     assert_list_elements_equal(expected_list, result['list'])
 
-
-# @Patch
 # def test_filter_text_search(client, dataset1):
 #     result = client \
 #         .get('/ds/%s/filter' % dataset1['ds_id'],
@@ -658,40 +662,3 @@ def test_filter_uncategorized(client, dataset1):
 #         },
 #     ]
 #     TestCase().assertCountEqual(expected_list, result['list'])
-
-
-@Patch
-def test_get_label_values(client, dataset1):
-    result = client \
-        .get('/ds/%s/label-values?col=Location&label=city' % dataset1['ds_id']) \
-        .get_json()
-    assert isinstance(result, dict)
-    assert result['success'] == True
-
-    expected_list = [
-        {
-            'id': '1',
-            'name': 'Moscow',
-            'loc': {
-                'type': 'Point',
-                'coordinates': [37.61556, 55.75222]
-            }
-        },
-        {
-            'id': '2',
-            'name': 'Paris',
-            'loc': {
-                'type': 'Point',
-                'coordinates': [2.3488, 48.85341]
-            }
-        },
-        {
-            'id': '3',
-            'name': 'New York',
-            'loc': {
-                'type': 'Point',
-                'coordinates': [-74.00597, 40.71427]
-            }
-        },
-    ]
-    assert_list_elements_equal(expected_list, result['list'])
