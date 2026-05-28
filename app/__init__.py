@@ -5,7 +5,6 @@ import os
 from asgiref.wsgi import WsgiToAsgi
 from flask import Flask
 
-from config import config
 from user_session import UserSessionInterface
 
 app = Flask(__name__)

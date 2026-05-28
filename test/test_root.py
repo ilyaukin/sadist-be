@@ -1,10 +1,6 @@
 import json
-import os
 from typing import Iterable, Any
-from unittest import mock
 
-import mongomock
-import pymongo
 import pytest
 from bson import ObjectId
 from mongomoron import delete, insert_many, insert_one
@@ -13,14 +9,6 @@ from pytest_unordered import unordered
 from app import app
 from db import conn, ds, ds_classification, ds_list, geo_city
 
-test_database_url = 'mongodb://localhost:27017,127.0.0.1:27018/test_sadist_be?replicaSet=rs0'
-if os.getenv('USE_MONGOMOCK'):
-    test_client = mongomock.MongoClient(test_database_url)
-else:
-    test_client = pymongo.MongoClient(test_database_url)
-# I want all mongo queries patched from now on...
-patched = mock.patch.object(conn, 'mongo_client', lambda: test_client)
-patched.start()
 
 
 def insert_cities():
@@ -384,9 +372,6 @@ def dataset2():
     }
 
 
-@pytest.fixture
-def client():
-    return app.test_client()
 
 
 def assert_list_elements_equal(expected: Iterable, actual: Iterable,

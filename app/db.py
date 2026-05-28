@@ -74,8 +74,10 @@ app_db_migration = Collection('app_db_migration')
 wc_proxy = Collection('wc_proxy')
 wc_script_template = Collection('wc_script_template')
 
+datetime_tracked_collections = [ds_list, app_user, app_user_session]
 
-@conn.add_hook(Operation.INSERT, [ds_list])
+
+@conn.add_hook(Operation.INSERT, datetime_tracked_collections)
 def hook_insert(documents: list[dict]):
     now = datetime.datetime.now()
     for document in documents:
@@ -83,7 +85,7 @@ def hook_insert(documents: list[dict]):
         document.setdefault('_updatedAt', now)
 
 
-@conn.add_hook(Operation.UPDATE, [ds_list])
+@conn.add_hook(Operation.UPDATE, datetime_tracked_collections)
 def hook_update(filter: dict, update: dict):
     now = datetime.datetime.now()
     update.setdefault('$set', {})

@@ -33,3 +33,17 @@ class objectset(collections.abc.MutableSet):
 
     def discard(self, value):
         del self._wrapped[self._wrap(value)]
+
+
+def deep_merge(source, destination):
+    """
+    Recursive merge of two dictionaries.
+    Values from source overwrite values in destination,
+    unless both are dictionaries, in which case they are merged.
+    """
+    for key, value in source.items():
+        if isinstance(value, dict) and key in destination and isinstance(destination[key], dict):
+            deep_merge(value, destination[key])
+        else:
+            destination[key] = value
+    return destination

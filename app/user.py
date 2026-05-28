@@ -10,6 +10,10 @@ from app import app, logger
 from db import conn, app_user
 from serializer import serialize
 from user_helper import anon_
+from collections_helper import deep_merge
+import secrets
+import os
+from app.email_helper import send_email
 
 
 @app.route('/user/whoami')
@@ -25,8 +29,11 @@ def login():
     u = payload["user"]
     user = User.of(u)
     user.validate()
-    user.lookup()
-    session["user"] = user.create_or_update()
+    if isinstance(user, LocalUser):
+        session["user"] = user.lookup()
+    else:
+        user.lookup()
+        session["user"] = user.create_or_update()
     return user_response(session["user"])
 
 
@@ -124,6 +131,10 @@ class BaseUser(User):
         """
         Update all fields by default
         """
+        existing = conn.execute(query_one(app_user).filter(app_user._id == self._id))
+        if existing:
+            self.u = deep_merge(self.u, existing)
+
         conn.execute(update_one(app_user).filter(app_user._id == self._id).set(self.u))
         return {'_id': self._id, **self.u}
 
@@ -156,7 +167,7 @@ class LocalUser(BaseUser):
         if 'password' not in self.u['extra'] or not self.u['extra']['password']:
             raise Exception('Password is required!')
         self.u['extra']['password'] = hashlib.md5(
-            self.u['extra']['password'] + self.SALT)
+            (self.u['extra']['password'] + self.SALT).encode()).hexdigest()
 
     @staticmethod
     def signup(u: dict) -> 'LocalUser':
@@ -165,29 +176,67 @@ class LocalUser(BaseUser):
             raise Exception('Attempting to sign up with non-local user type')
 
         # we don't allow to hijack logins
-        if user.by_login() or user.by_login_to_confirm():
+        db_user = user.by_login()
+        if db_user:
             raise Exception(f"User login {u['extra']['login']} already exists")
+
+        db_user = user.by_login_to_confirm()
+        if db_user:
+            # if user with the input login to confirm already exists, and input email matches email or email to confirm,
+            # we should go on and update toConfirm data, instead of throwing an error.
+            input_email = u['extra']['email']
+            emails = [
+                db_user.get('extra', {}).get('email'),
+                db_user.get('toConfirm', {}).get('extra', {}).get('email')
+            ]
+            if input_email not in emails:
+                raise Exception(f"User login {u['extra']['login']} already exists")
 
         # from the other hand, we allow to hijack emails, because if
         # a user haven't received email confirmation, he still should
         # be able to proceed or restart registration
-        db_user = user.by_email() or user.by_email_to_confirm()
+        db_user = db_user or user.by_email() or user.by_email_to_confirm()
         if db_user:
             user._id = db_user['_id']
         user.u = {'toConfirm': user.u}
 
         # generate confirmation hash
-        # TODO
+        user.u['confirmationHash'] = secrets.token_hex(16)
 
         # send an email
-        # TODO
+        email = user.u['toConfirm']['extra']['email']
+        subject = "Confirm your registration"
+        base_url = os.environ.get('BASE_URL') or (request.host_url.rstrip('/') if request else None)
+        if not base_url:
+            raise Exception('BASE_URL is not set')
+        link = f"{base_url}/user/confirm/{user.u['confirmationHash']}"
+        body = f"Please confirm your registration by clicking the link: {link}"
+
+        send_email(email, subject, body)
 
         return user
 
     @staticmethod
     def confirm(confirmation_hash: str):
-        # TODO move toConfirm fields to the record
-        pass
+        db_user = conn.execute(query_one(app_user).filter(
+            app_user.confirmationHash == confirmation_hash
+        ))
+        if not db_user:
+            raise Exception('Invalid confirmation hash')
+
+        to_confirm = db_user.get('toConfirm')
+        if not to_confirm:
+            raise Exception('Nothing to confirm')
+
+        # deep merge of the user data
+        merged_user = deep_merge(to_confirm, db_user)
+        # ... and remove the fields to unset
+        del merged_user['toConfirm']
+        del merged_user['confirmationHash']
+
+        conn.execute(update_one(app_user).filter(app_user._id == db_user['_id'])
+                     .set(merged_user)
+                     .unset('toConfirm', 'confirmationHash'))
 
     def validate(self) -> None:
         if not self.lookup():
