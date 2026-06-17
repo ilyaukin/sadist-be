@@ -5,7 +5,7 @@ from typing import List, Union, Iterable, Dict
 import pycrfsuite
 from mongomoron import query
 
-from db import conn, dl_seq_label, dl_seq, replace_grid_file, read_grid_file
+from db import conn, dl_seq_label, dl_seq, write_grid_file, read_grid_file_content
 from detailization.abstract_detailizer import AbstractDetailizer
 from detailization.bow_detailizer import BowDetailizer
 
@@ -223,11 +223,11 @@ class SequenceDetailizer(AbstractDetailizer):
     def _save_model(self):
         with open(f'/tmp/{self.model_name}.mod', 'rb') as file:
             data = file.read()
-            replace_grid_file(data, f'nn_model_{self.model}')
+            write_grid_file(data, f'nn_model_{self.model}')
 
     def _load_model(self):
         with open(f'/tmp/{self.model_name}.{os.getpid()}.mod', 'wb') as file:
-            data = read_grid_file(f'nn_model_{self.model}')
+            data = read_grid_file_content(f'nn_model_{self.model}')
             file.write(data)
 
         self.tagger = pycrfsuite.Tagger()

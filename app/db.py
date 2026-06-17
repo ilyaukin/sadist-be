@@ -4,6 +4,7 @@ from typing import Union
 
 import gridfs
 import pymongo
+from gridfs import GridOut
 from mongomoron import DatabaseConnection, Collection, Operation
 from pymongo.database import Database
 
@@ -27,7 +28,12 @@ class SadistDatabaseConnection(DatabaseConnection):
 
     @property
     def fs(self) -> gridfs.GridFS:
-        return gridfs.GridFS(self.db())
+        if not hasattr(self, '_fs_pool'):
+            self._fs_pool = dict()
+        pid = os.getpid()
+        if pid not in self._fs_pool:
+            self._fs_pool[pid] = gridfs.GridFS(self.db())
+        return self._fs_pool[pid]
 
     def _new_client(self) -> pymongo.MongoClient:
         return pymongo.MongoClient(SadistDatabaseConnection.DATABASE_URL, socketTimeoutMS=30000, authSource='admin')
@@ -92,20 +98,21 @@ def hook_update(filter: dict, update: dict):
     update['$set']['_updatedAt'] = now
 
 
-def replace_grid_file(data: bytes, filename: str):
+def write_grid_file(data: bytes, filename: str, content_type: str = None):
     """
     Create or replace a file in GridFS by filename
     @param data: Binary file data
     @param filename: filename
+    @param content_type: MIME type of the file
     @return: None
     """
     old_file = conn.fs.find_one({'filename': filename})
     if old_file:
         conn.fs.delete(old_file._id)
-    conn.fs.put(data, filename=filename)
+    conn.fs.put(data, filename=filename, contentType=content_type)
 
 
-def read_grid_file(filename: str) -> Union[bytes, None]:
+def read_grid_file_content(filename: str) -> Union[bytes, None]:
     """
     Get data from the file in GridFS
     @param filename: filename
@@ -115,3 +122,12 @@ def read_grid_file(filename: str) -> Union[bytes, None]:
     if file:
         return file.read()
     return None
+
+
+def read_grid_file(filename: str) -> Union[GridOut, None]:
+    """
+    Get full file object from GridFS
+    @param filename: filename
+    @return: GridOut object or None
+    """
+    return conn.fs.find_one({'filename': filename})

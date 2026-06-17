@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.neural_network import MLPClassifier
 
 from app import logger
-from db import replace_grid_file, read_grid_file
+from db import write_grid_file, read_grid_file_content
 from detailization.abstract_detailizer import AbstractDetailizer
 
 
@@ -174,14 +174,14 @@ class BowDetailizer(AbstractDetailizer):
         wtoi_data = pickle.dumps(self.wtoi_map)
         ttoi_data = pickle.dumps(self.ttoi_map)
         model_data = pickle.dumps(self.model)
-        replace_grid_file(wtoi_data, f'nn_map_input_{self.model_name}')
-        replace_grid_file(ttoi_data, f'nn_map_target_{self.model_name}')
-        replace_grid_file(model_data, f'nn_model_{self.model_name}')
+        write_grid_file(wtoi_data, f'nn_map_input_{self.model_name}')
+        write_grid_file(ttoi_data, f'nn_map_target_{self.model_name}')
+        write_grid_file(model_data, f'nn_model_{self.model_name}')
 
     def _load_model(self):
-        wtoi_data = read_grid_file(f'nn_map_input_{self.model_name}')
-        ttoi_data = read_grid_file(f'nn_map_target_{self.model_name}')
-        model_data = read_grid_file(f'nn_model_{self.model_name}')
+        wtoi_data = read_grid_file_content(f'nn_map_input_{self.model_name}')
+        ttoi_data = read_grid_file_content(f'nn_map_target_{self.model_name}')
+        model_data = read_grid_file_content(f'nn_model_{self.model_name}')
         if not wtoi_data or not ttoi_data or not model_data:
             raise Exception(f'No {self.model_name} model in the DB')
         self.wtoi_map = pickle.loads(wtoi_data)

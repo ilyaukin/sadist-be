@@ -1,19 +1,18 @@
 import hashlib
+import os
+import secrets
 from typing import Optional
 
 import jwt
+from app import app, logger
+from app.email_helper import send_email
+from collections_helper import deep_merge
+from db import conn, app_user
 from flask import request, session
 from jwt import PyJWKClient
 from mongomoron import insert_one, update_one, query_one, and_, or_
-
-from app import app, logger
-from db import conn, app_user
 from serializer import serialize
 from user_helper import anon_
-from collections_helper import deep_merge
-import secrets
-import os
-from app.email_helper import send_email
 
 
 @app.route('/user/whoami')
@@ -52,6 +51,7 @@ def signup():
     logger.debug("User sign up: %s", payload)
 
     u = payload['user']
+
     user = LocalUser.signup(u)
 
     return user_response(user.create_or_update())
