@@ -53,3 +53,11 @@ sudo mkdir -p /etc/systemd/system/docker.service.d/
 echo -e "[Service]\nExecStart=\nExecStart=/usr/bin/dockerd -H unix:///var/run/docker.sock -H tcp://127.0.0.1:23750 --containerd=/run/containerd/containerd.sock" | sudo tee /etc/systemd/system/docker.service.d/override.conf
 sudo systemctl daemon-reload
 ```
+
+
+### run the app with the environment from `.env` file
+```shell
+set -a
+source .env 
+python run.py 
+```
