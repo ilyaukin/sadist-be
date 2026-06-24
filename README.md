@@ -162,3 +162,49 @@ ids.forEach((_id) => {
 _ids = db.ds_list.find().map(rec => rec._id + '')
 for (let n of db.getCollectionNames()) { if(/^ds_[a-f0-9]{24}(!?_classification)?$/.test(n)) { const m = _ids.find(_id => n.indexOf(_id) !== -1); if (!m) { db[n].drop() }; }  }
 ```
+
+
+## AI usage guidelines
+
+Below are guidelines for the usage of AI coding agents in the project. They are
+written with Junie and JetBrains IDEs in mind, but keep 
+them tool-agnostic where possible.
+
+### Suggested process
+
+The `.junie` directory acts as the "long-term memory" for AI agents. Since agents have a limited context window, this directory allows them to stay consistent across multiple sessions.
+
+- **`.junie/memory/tasks.md`**: Use this to track the high-level roadmap and the status of specific sub-tasks. It helps the agent know "what's next" without being told every time.
+- **`.junie/memory/errors.md`**: Record project-specific "gotchas," recurring bugs, or specific coding standards that the agent should keep in mind.
+- **`.junie/plans/`**: For complex tasks, ask the agent to write a plan here first. This allows you to review the strategy before execution and provides a reference if the session needs to be restarted.
+
+**Recommended Workflow:**
+1. At the start of a task, ask the agent to read `.junie/memory/`.
+2. For large tasks, ask the agent to create/update a plan in `.junie/plans/`.
+3. After completing work, ensure the agent updates `tasks.md` with the latest progress.
+
+### Q&A
+
+#### What 'New Chat' does? What is shared and what is not between chats?
+
+'New Chat' starts a fresh conversation with a clean context window.
+- **Shared:** The codebase index (file structure, symbol search) and any files on disk (including `.junie`).
+- **Not shared:** The specific history of previous messages and any "mental state" the agent had during that session. Use `.junie` files to bridge important information between chats.
+
+#### Can the context be shared between projects and different JetBrains products?
+
+No, agent sessions are typically scoped to the current IDE project. If you have PyCharm for backend and WebStorm for frontend, they won't see each other's chat history.
+- **Workaround:** If you need to make cross-repo changes, try opening both projects in a single IDE window (e.g., by opening the parent directory) or manually copy-paste relevant context (like API definitions) into the chat.
+
+#### How to keep chat history between IDE runs?
+
+The IDE generally persists chat history in its internal database. However, chat history can become bloated and confusing for the agent over time. It is better to rely on `.junie/memory/` for critical project state rather than old chat logs.
+
+#### How to keep allowed commands between IDE runs?
+
+Permissions (e.g., allowing the agent to run `bash` or `pytest`) are usually stored in the IDE's AI settings. You can often configure these to be "Always allowed" for a specific project to reduce interruptions.
+
+#### I have a scrolling issue
+
+Sometimes the chat window doesn't automatically scroll down when the agent is generating a long response or waiting for your approval.
+- **Solution:** Manually scroll to the bottom if you see the "Thinking..." indicator but no new text, or look for a "Scroll to bottom" arrow in the chat UI.

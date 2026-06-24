@@ -51,6 +51,10 @@ class UserSession(dict, SessionMixin):
     def modified(self):
         return self._modified
 
+    @modified.setter
+    def modified(self, value):
+        self._modified = value
+
 
 class UserSessionInterface(SessionInterface):
     def open_session(self, app, request):

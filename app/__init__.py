@@ -5,7 +5,6 @@ import os
 from asgiref.wsgi import WsgiToAsgi
 from flask import Flask
 
-from config import config
 from user_session import UserSessionInterface
 
 app = Flask(__name__)
@@ -18,4 +17,4 @@ if os.path.exists('logging.ini'):
     logger.handlers.clear()
     logging.config.fileConfig('logging.ini', disable_existing_loggers=False)
 
-from . import root, error_handler, user, labelling, debug, web_crawler, extra_pages
+from . import root, error_handler, user, labelling, debug, web_crawler, extra_pages, image_api

@@ -1,3 +1,4 @@
+from unittest import mock
 from typing import Hashable, Any, Iterable
 
 import app.detailization as detailization
@@ -23,7 +24,9 @@ class TinyStupidBowDetailizer(BowDetailizer):
         ]
 
 
-def test_bow_detailizer():
+@mock.patch('detailization.bow_detailizer.write_grid_file')
+@mock.patch('detailization.bow_detailizer.read_grid_file_content')
+def test_bow_detailizer(mock_read, mock_write):
     detailizer = TinyStupidBowDetailizer()
     detailizer.learn()
 

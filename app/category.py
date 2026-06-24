@@ -456,7 +456,7 @@ class CountryCategory(Category):
     def get_visualization(self, ds_list_record: dict, col: str) -> List[Visualization]:
         return [VizGraphMeta(
             key=f'{col} country',
-            stringrepr='Show counties',
+            stringrepr='Show countries',
             type='globe',
             props=GroupProps(col=col, label='country'),
             labelselector='id.name',
