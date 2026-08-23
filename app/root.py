@@ -1,7 +1,6 @@
 import csv
 import io
 import json
-from concurrent.futures._base import Future
 from typing import Union, Iterable, Optional
 
 import pymongo
@@ -11,10 +10,10 @@ from mongomoron import *
 
 from app import app, logger
 from category import Category
-from classification import call_classify_cells, PatternClassifier, SequenceClassifier
+from classification import PatternClassifier, SequenceClassifier
 from db import conn, ds, ds_list, ds_classification
-from detailization import call_get_details_for_all_cols
 from error_handler import error
+from scheduler.task_interface import EXECUTION_TYPE_SINGLE, create_task
 from serializer import serialize
 from user_helper import anon_
 
@@ -308,12 +307,14 @@ def _add_ds(ds_id, csv_file):
 
 
 def _process_ds(ds_id):
-    def on_classify_done(future: Future):
-        if not future.exception():
-            call_get_details_for_all_cols(ds_id)
-
-    call_classify_cells(ds_id, SequenceClassifier.get()) \
-        .add_done_callback(on_classify_done)
+    create_task(
+        task_type='classify_ds',
+        execution_type=EXECUTION_TYPE_SINGLE,
+        payload={
+            'dsId': str(ds_id),
+            'classifier': SequenceClassifier.__key__,
+        },
+    )
 
 
 def _update_ds_list_record(ds_id: Union[str, ObjectId], d: dict):

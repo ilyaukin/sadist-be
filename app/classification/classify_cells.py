@@ -1,17 +1,12 @@
 import datetime
-import traceback
-from concurrent.futures._base import Future
 from typing import Union, Optional, Any, Tuple
 
-from bson import ObjectId
-from mongomoron import index, query, insert_many, update, insert_one, aggregate, \
-    avg
-
-from app import logger
-from async_loop import call_async
 from async_processing import process_in_parallel
+from bson import ObjectId
 from classification.abstract_classifier import AbstractClassifier
 from db import conn, ds_classification, ds, ds_list, cl_stat
+from mongomoron import index, query, insert_many, update, insert_one, aggregate, \
+    avg
 
 # settings
 CHUNK_SIZE = 100
@@ -62,27 +57,6 @@ def classify_cells(ds_id: Union[str, ObjectId],
         'status': 'finished'
     })
     _update_cl_stat_record(cl_stat_id)
-
-
-def call_classify_cells(ds_id: Union[str, ObjectId],
-                        classifier: AbstractClassifier) -> Future:
-    """
-    Call classify_cells and don't wait for
-    completion
-    :param ds_id: Data source ID
-    :param classifier: Classifier
-    :return:
-    """
-
-    def _handle_async_exception(f: Future):
-        e = f.exception()
-        if e:
-            logger.error(traceback.format_exc())
-            _update_ds_list_record(ds_id, {'status': 'failed', 'error': str(e)})
-
-    f = call_async(classify_cells, ds_id, classifier)
-    f.add_done_callback(_handle_async_exception)
-    return f
 
 
 def _execute_task(task: Tuple, classifier: AbstractClassifier):

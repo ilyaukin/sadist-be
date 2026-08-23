@@ -1,4 +1,3 @@
-import concurrent.futures
 import sys
 from argparse import ArgumentParser
 
@@ -6,8 +5,7 @@ import app.classification as classification
 from classification import classify_cells, AbstractClassifier
 from db import conn, dl_master
 from mongomoron import query
-
-from detailization import call_get_details_for_all_cols
+from scheduler.task_interface import EXECUTION_TYPE_SINGLE, create_task
 
 if __name__ == '__main__':
     argparser = ArgumentParser()
@@ -32,8 +30,11 @@ if __name__ == '__main__':
         if args.ds:
             classify_cells(args.ds, classifier)
             if args.get_details:
-                ff = call_get_details_for_all_cols(args.ds)
-                concurrent.futures.wait(ff)
+                create_task(
+                    task_type='detailize_cols',
+                    execution_type=EXECUTION_TYPE_SINGLE,
+                    payload={'dsId': args.ds},
+                )
             exit(0)
         text = args.text
         if not text:
