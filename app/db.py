@@ -80,7 +80,10 @@ app_db_migration = Collection('app_db_migration')
 wc_proxy = Collection('wc_proxy')
 wc_script_template = Collection('wc_script_template')
 
-datetime_tracked_collections = [ds_list, app_user, app_user_session]
+task_active = Collection('task_active')
+task_archive = Collection('task_archive')
+
+datetime_tracked_collections = [ds_list, app_user, app_user_session, task_active, task_archive]
 
 
 @conn.add_hook(Operation.INSERT, datetime_tracked_collections)
