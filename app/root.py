@@ -307,12 +307,21 @@ def _add_ds(ds_id, csv_file):
 
 
 def _process_ds(ds_id):
+    ds_record = conn.execute(query_one(ds_list).filter(ds_list._id == ObjectId(ds_id)))
     create_task(
         task_type='classify_ds',
         execution_type=EXECUTION_TYPE_SINGLE,
         payload={
             'dsId': str(ds_id),
             'classifier': SequenceClassifier.__key__,
+        },
+    )
+    create_task(
+        task_type='cleanup_old_ds',
+        execution_type=EXECUTION_TYPE_SINGLE,
+        payload={
+            'name': ds_record['name'],
+            'keep': 1,
         },
     )
 

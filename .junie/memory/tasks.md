@@ -140,6 +140,14 @@ There is no permanent `done` status in `task_active` for the first implementatio
   - set `ds_list.detailization.<col>.status = "failed"` with an error on permanent failure.
 - `process_in_parallel(...)` can remain as a local optimization inside task handlers, but it should not be used as the durable scheduling layer.
 
+#### New task types
+- `cleanup_old_ds` task handler should:
+  - find all DSes by a given `name` with `status` "old";
+  - if there are more than N old DSes, remove all but N last ones:
+    - drop the corresponding DS collection;
+    - drop the corresponding DS classification collection;
+    - delete `ds_list` record.
+
 #### Important implementation details
 - Task payloads must be JSON-serializable and backward-compatible across deployments; do not store Python callables or other runtime-dependent objects.
 - Handlers should be idempotent because a worker can crash after doing DB writes but before marking the task completed.
