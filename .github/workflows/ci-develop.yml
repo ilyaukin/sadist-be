@@ -15,5 +15,5 @@ jobs:
     # Trigger sadist-ci's reusable workflow
     uses: my-handicapped-pet/sadist-ci/.github/workflows/ci-develop.yml@develop
     with:
-      image_list: '["webapp-nginx","webapp-flask","certbot"]'
+      image_list: '["webapp-nginx","task-queue","webapp-flask","certbot"]'
     secrets: inherit
