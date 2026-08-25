@@ -9,6 +9,7 @@ from flask import render_template, request, session
 from mongomoron import *
 
 from app import app, logger
+from app.url_helper import get_base_url
 from category import Category
 from classification import PatternClassifier, SequenceClassifier
 from db import conn, ds, ds_list, ds_classification
@@ -322,6 +323,15 @@ def _process_ds(ds_id):
         payload={
             'name': ds_record['name'],
             'keep': 1,
+        },
+    )
+    create_task(
+        task_type='notify_ds_subscribers',
+        execution_type=EXECUTION_TYPE_SINGLE,
+        payload={
+            'dsId': str(ds_id),
+            'dsName': ds_record['name'],
+            'baseUrl': get_base_url('http://localhost'),
         },
     )
 

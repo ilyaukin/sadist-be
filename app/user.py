@@ -1,11 +1,11 @@
 import hashlib
-import os
 import secrets
 from typing import Optional
 
 import jwt
 from app import app, logger
 from app.email_helper import send_email
+from app.url_helper import get_base_url
 from collections_helper import deep_merge
 from db import conn, app_user
 from flask import request, session
@@ -206,10 +206,7 @@ class LocalUser(BaseUser):
         # send an email
         email = user.u['toConfirm']['extra']['email']
         subject = "Confirm your registration"
-        base_url = os.environ.get('BASE_URL') or (request.host_url.rstrip('/') if request else None)
-        if not base_url:
-            raise Exception('BASE_URL is not set')
-        link = f"{base_url}/user/confirm/{user.u['confirmationHash']}"
+        link = f"{get_base_url()}/user/confirm/{user.u['confirmationHash']}"
         body = f"Please confirm your registration by clicking the link: {link}"
 
         send_email(email, subject, body)
