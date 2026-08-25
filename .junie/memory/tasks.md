@@ -2,6 +2,129 @@
 
 ## Roadmap / Pending Tasks
 
+### DS update notifications
+
+Allow users to subscribe to updates of a certain DS.
+
+#### Subscription model
+
+User may subscribe to a given DS by name. Once a new DS with that name is uploaded, a task checks if it has new data missing in the latest previous DS with the same name and `status = "old"`. DSes with `failed` and other irrelevant statuses are ignored for comparison.
+
+New `ds_subscription` collection contains:
+- `dsName`: name of the DS;
+- `query`: MongoDB query to filter documents in both old and new DS collections. For the first implementation, only simple `{key: value}` equality queries are supported;
+- `fields`: a list of one or more fields, by which we consider uniqueness. If there is a tuple of these fields for some document in the new DS that is missing in the old one, DS is considered updated and this document is considered new;
+- `message`: a message to send to subscribers. Only one message is sent per DS update. It should be formatted against a dict that contains key-values of any new document and special values:
+  - `$#`: count of new documents;
+  - `$url`: link to the new uploaded DS in format `<base_url>/?id=<ds_id>`;
+- `userIds`: a list of user IDs subscribed to this subscription.
+
+If a message template references a missing field, the task should raise the standard `KeyError`.
+
+We may also want to update `app_user` collection to add something like `{"settings": {"notificationChannels": ["email"]}}`.
+
+#### Endpoints
+
+- `POST /subscribe`: create a new subscription and subscribe current user to it. Only for authorized users.
+
+  Request body:
+  ```json
+  {
+    "dsName": "prices.csv",
+    "query": {"category": "books"},
+    "fields": ["sku", "shop"],
+    "message": "Found {$#} new prices, including {sku}: {$url}"
+  }
+  ```
+
+  Response body:
+  ```json
+  {
+    "item": {
+      "_id": "subscription_id",
+      "dsName": "prices.csv",
+      "query": {"category": "books"},
+      "fields": ["sku", "shop"],
+      "message": "Found {$#} new prices, including {sku}: {$url}",
+      "subscribed": true
+    },
+    "success": true
+  }
+  ```
+
+- `POST /subscribe/<subscription_id>`: subscribe current user to an existing subscription. Only for authorized users.
+
+  Response body:
+  ```json
+  {
+    "success": true
+  }
+  ```
+
+- `POST /unsubscribe`: unsubscribe current user from all subscriptions. Only for authorized users.
+
+  Response body:
+  ```json
+  {
+    "success": true
+  }
+  ```
+
+- `POST /unsubscribe/<subscription_id>`: unsubscribe current user from the given subscription. Only for authorized users.
+
+  Response body:
+  ```json
+  {
+    "success": true
+  }
+  ```
+
+- `GET /ds/subscriptions?ds_name=...`: get subscriptions by DS name in format: `_id`, `dsName`, `query`, `fields`, `message`, `subscribed` (if current user is subscribed).
+
+  Response body:
+  ```json
+  {
+    "list": [
+      {
+        "_id": "subscription_id",
+        "dsName": "prices.csv",
+        "query": {"category": "books"},
+        "fields": ["sku", "shop"],
+        "message": "Found {$#} new prices, including {sku}: {$url}",
+        "subscribed": true
+      }
+    ],
+    "success": true
+  }
+  ```
+
+- `GET /subscriptions`: get all current user subscriptions in format: `_id`, `dsName`, `query`, `fields`, `message`.
+
+  Response body:
+  ```json
+  {
+    "list": [
+      {
+        "_id": "subscription_id",
+        "dsName": "prices.csv",
+        "query": {"category": "books"},
+        "fields": ["sku", "shop"],
+        "message": "Found {$#} new prices, including {sku}: {$url}"
+      }
+    ],
+    "success": true
+  }
+  ```
+
+#### DS processing logic
+
+- When a new DS is uploaded, create a task that will do the following:
+  - find the latest previous DS with the same `name` and `status = "old"`;
+  - iterate subscriptions by DS name;
+  - run the subscription `query` on both old and new DS collections;
+  - for each subscription, check if DS is updated in terms of this subscription, by the logic described above;
+  - if it is updated, send one message to the subscribers via their configured notification channels, default is `email`.
+
 ## Completed Tasks
 
 ### Task Scheduling
