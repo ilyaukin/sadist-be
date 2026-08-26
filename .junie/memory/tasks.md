@@ -2,6 +2,96 @@
 
 ## Roadmap / Pending Tasks
 
+### Telegram integration
+
+#### Proposed design
+- Add `PATCH /user/settings` endpoint, so user can edit their settings, including `telegram` (Telegram username).
+- Add Telegram bot configuration via environment variables:
+  - `TELEGRAM_BOT_TOKEN`: bot token used to call Telegram Bot API;
+  - `TELEGRAM_WEBHOOK_SECRET`: secret token expected from Telegram webhook requests.
+- Use Telegram webhooks instead of polling `getUpdates`.
+- Add a Telegram webhook endpoint that receives bot updates, validates the webhook secret, and handles messages from users who started the bot.
+- When a webhook update contains Telegram chat/user data:
+  - read `chat.id` and save/update a `tg_chat` document with `chat.id` as `_id`;
+  - read `chat.username` and save it to `tg_chat.telegramUsername`;
+  - create an asynchronous task that matches `tg_chat` documents with `app_user` records.
+- When user settings are changed and `settings.telegram` is updated, create the same asynchronous matching task.
+- The matching task supports both flows:
+  - user first adds Telegram username to settings, then starts the bot;
+  - user first starts the bot, then adds Telegram username to settings.
+- Once a chat is matched to a user, save `chat.id` to `app_user.extra.telegramChatIds` and `chat.username` to `app_user.extra.telegramUsername`.
+- Now, by knowing user's Telegram chat IDs, we may send messages to the user via `telegram` notification channel.
+- Add a CLI script in `scripts/` to manage Telegram webhook configuration.
+- Add queued notification tasks, so subscription processing only creates notification work and does not fail entirely if sending one message to one user/channel fails.
+
+#### User settings
+
+- `settings.telegram`: Telegram username entered by the user. It should be normalized before storing/comparing: remove leading `@` and compare case-insensitively.
+- `settings.notificationChannels`: list of enabled notification channels, for example `['email', 'telegram']`.
+- `extra.telegramChatIds`: list of Telegram `chat.id` values matched to the user. These values are used as `chat_id` when sending messages through Telegram Bot API.
+- `extra.telegramUsername`: Telegram `chat.username` received from the webhook, stored for debugging/audit and to reflect the actual Telegram account that was linked.
+
+#### Telegram chat model
+
+New `tg_chat` collection contains Telegram chats known from webhooks:
+- `_id`: Telegram `chat.id`;
+- `telegramUsername`: normalized Telegram `chat.username`;
+- `status`: notification status for this chat, either `active` or `paused`;
+- `lastUpdate`: last raw or normalized supported update metadata useful for debugging.
+
+The collection allows matching users even if the user starts the bot before adding Telegram username in app settings.
+
+#### Webhook logic
+
+- Telegram webhook endpoint should be exposed by Flask, for example `POST /telegram/webhook`.
+- The endpoint must validate Telegram webhook secret from the request against `TELEGRAM_WEBHOOK_SECRET`.
+- For each supported update:
+  - extract `message.chat.id`;
+  - extract `message.chat.username`;
+  - normalize username;
+  - save/update the `tg_chat` document;
+  - create a `match_telegram_chats` task.
+- If username is missing, the hook should not fail the request; it may log the situation and return success to Telegram.
+- Supported bot commands:
+  - `/pause`: set the chat `status` to `paused`, so notifications are temporarily disabled without unsubscribing the app user from DS subscriptions;
+  - `/resume`: set the chat `status` to `active`, so notifications can be sent again.
+
+#### Telegram matching task
+
+- Add a single task, for example `match_telegram_chats`, that matches `tg_chat.telegramUsername` with normalized `app_user.settings.telegram`.
+- The task is created after each supported webhook update and after each `settings.telegram` change.
+- If a matching app user is found:
+  - add the Telegram chat ID to `app_user.extra.telegramChatIds`, preserving existing IDs and avoiding duplicates;
+  - save/update `app_user.extra.telegramUsername`;
+  - send Telegram message: `Welcome, {username}! Your telegram has been added. Explore more fresh data at {base_url}!`.
+- If a Telegram chat exists, but no app user matches it, send Telegram message: `Welcome, {username}! Add your telegram at {base_url} to get notifications about new data.`.
+- Welcome messages are constants in code for now; no configuration is needed.
+
+#### Webhook management CLI
+
+- Add a script in `scripts/` to manage Telegram webhook settings through Bot API.
+- Suggested commands:
+  - `set`: set webhook URL and secret;
+  - `delete`: delete current webhook;
+  - `info`: show current webhook information.
+- The script should read `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` from environment variables.
+- `set` should accept the public webhook URL, for example:
+
+  ```bash
+  PYTHONPATH=app ./venv-test/bin/python scripts/telegram_webhook.py set https://example.com/telegram/webhook
+  ```
+
+#### Notification sending
+
+- If user has `telegram` in `settings.notificationChannels`, send Telegram messages only when `extra.telegramChatIds` exists.
+- If user has `telegram` in `settings.notificationChannels`, create Telegram notification tasks for active IDs from `extra.telegramChatIds`.
+- A Telegram chat with `status = "paused"` must be skipped until `/resume` is received.
+- Missing `settings.notificationChannels` still defaults to `['email']`, so Telegram notifications are opt-in.
+- Empty `settings.notificationChannels` means the user disabled all notifications.
+- Telegram send errors should raise exceptions, consistently with email sending.
+- Email and Telegram delivery must be queued as separate notification tasks, for example `send_email_notification` and `send_telegram_notification`.
+- DS subscription processing must enqueue notification tasks instead of sending messages directly. This prevents one failed user/channel delivery from failing the entire subscription task.
+
 ### DS update notifications
 
 Allow users to subscribe to updates of a certain DS.
@@ -137,7 +227,7 @@ We may also want to update `app_user` collection to add something like `{"settin
   - iterate subscriptions by DS name;
   - run the subscription `query` on both old and new DS collections;
   - for each subscription, check if DS is updated in terms of this subscription, by the logic described above;
-  - if it is updated, send one message to the subscribers via their configured notification channels, default is `email`.
+  - if it is updated, create notification tasks for the subscribers via their configured notification channels, default is `email`.
 
 ## Completed Tasks
 
