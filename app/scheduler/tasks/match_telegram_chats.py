@@ -1,3 +1,4 @@
+from bson import ObjectId
 from mongomoron import query
 
 from app.telegram_helper import send_telegram_message
@@ -16,29 +17,53 @@ class MatchTelegramChatsTask(Task):
         """Validate optional chat selector payload."""
         if payload.get('chatId') is not None and payload.get('chatId') == '':
             raise ValueError('chatId must not be empty')
+        if payload.get('userId') is not None and payload.get('userId') == '':
+            raise ValueError('userId must not be empty')
+        if payload.get('telegramUsername') is not None and payload.get('telegramUsername') == '':
+            raise ValueError('telegramUsername must not be empty')
         if not payload.get('baseUrl'):
             raise ValueError('baseUrl is required')
 
     def execute(self, payload: dict):
         """Match known Telegram chats to app users and send welcome messages."""
         chat_id = payload.get('chatId')
-        chats = _get_chats(chat_id)
+        user = _get_user(payload.get('userId'), payload.get('telegramUsername'))
+        chats = _get_chats(chat_id, payload.get('telegramUsername'), user)
         for chat in chats:
-            _match_chat(chat, payload['baseUrl'], chat_id is not None)
+            _match_chat(chat, user, payload['baseUrl'], chat_id is not None)
 
 
-def _get_chats(chat_id=None):
+def _get_chats(chat_id=None, telegram_username=None, user=None):
     if chat_id is None:
+        if telegram_username:
+            return conn.execute(query(tg_chat).filter(tg_chat.telegramUsername == telegram_username))
+        if user:
+            telegram_username = (user.get('settings') or {}).get('telegram')
+            if telegram_username:
+                return conn.execute(query(tg_chat).filter(tg_chat.telegramUsername == telegram_username))
         return conn.execute(query(tg_chat))
     return conn.execute(query(tg_chat).filter(tg_chat._id == chat_id))
 
 
-def _match_chat(chat: dict, base_url: str, notify_unmatched: bool):
+def _get_user(user_id=None, telegram_username=None):
+    if user_id:
+        return next(iter(conn.execute(query(app_user).filter(app_user._id == _object_id(user_id)))), None)
+    if telegram_username:
+        return next(iter(conn.execute(query(app_user).filter(app_user.settings.telegram == telegram_username))), None)
+    return None
+
+
+def _object_id(value):
+    if isinstance(value, ObjectId):
+        return value
+    return ObjectId(value)
+
+
+def _match_chat(chat: dict, user: dict, base_url: str, notify_unmatched: bool):
     username = chat.get('telegramUsername')
     if not username:
         return
-    user = next(iter(conn.execute(
-        query(app_user).filter(app_user.settings.telegram == username))), None)
+    user = user or next(iter(conn.execute(query(app_user).filter(app_user.settings.telegram == username))), None)
     if user:
         _bind_chat_to_user(user, chat)
         message = MATCHED_MESSAGE.format(username=username, base_url=base_url)

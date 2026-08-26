@@ -29,6 +29,7 @@ def telegram_webhook():
     _save_chat(chat_id, username, status, update_data)
     create_task('match_telegram_chats', EXECUTION_TYPE_SINGLE, {
         'chatId': chat_id,
+        'telegramUsername': username,
         'baseUrl': get_base_url('http://localhost'),
     })
     return {'success': True}

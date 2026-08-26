@@ -30,7 +30,11 @@ def test_update_settings_normalizes_telegram_and_creates_matching_task(client):
     }
     assert response['user']['settings'] == user['settings']
     task = conn.db()[task_active._name].find_one({'taskType': 'match_telegram_chats'})
-    assert task['payload'] == {'baseUrl': 'http://localhost'}
+    assert task['payload'] == {
+        'userId': str(user_id),
+        'telegramUsername': 'testuser',
+        'baseUrl': 'http://localhost',
+    }
 
 
 def test_update_settings_does_not_create_matching_task_for_same_telegram(client):
@@ -82,7 +86,7 @@ def test_telegram_webhook_saves_chat_and_creates_matching_task(client, monkeypat
     assert chat['telegramUsername'] == 'testuser'
     assert chat['status'] == 'active'
     task = conn.db()[task_active._name].find_one({'taskType': 'match_telegram_chats'})
-    assert task['payload'] == {'chatId': 123, 'baseUrl': 'http://localhost'}
+    assert task['payload'] == {'chatId': 123, 'telegramUsername': 'testuser', 'baseUrl': 'http://localhost'}
 
 
 def test_telegram_webhook_pause_and_resume(client, monkeypatch):
@@ -168,6 +172,52 @@ def test_match_telegram_chats_sends_unmatched_welcome(monkeypatch):
     MatchTelegramChatsTask().execute({'chatId': 3, 'baseUrl': 'http://sadist.test'})
 
     assert messages == [(3, 'Welcome, unknown! Add your telegram at http://sadist.test to get notifications about new data.')]
+
+
+def test_match_telegram_chats_uses_user_id_to_find_username_chats(monkeypatch):
+    messages = []
+    conn.db()[tg_chat._name].delete_many({})
+    user_id = ObjectId()
+    conn.execute(insert_one(app_user, {
+        '_id': user_id,
+        'settings': {'telegram': 'directuser'},
+    }))
+    conn.execute(insert_one(tg_chat, {
+        '_id': 5,
+        'telegramUsername': 'directuser',
+        'status': 'active',
+    }))
+    monkeypatch.setattr('scheduler.tasks.match_telegram_chats.send_telegram_message',
+                        lambda *args: messages.append(args))
+
+    MatchTelegramChatsTask().execute({'userId': str(user_id), 'baseUrl': 'http://sadist.test'})
+
+    user = conn.db()[app_user._name].find_one({'_id': user_id})
+    assert user['extra']['telegramChatIds'] == [5]
+    assert messages == [(5, 'Welcome, directuser! Your telegram has been added. Explore more fresh data at http://sadist.test!')]
+
+
+def test_match_telegram_chats_uses_telegram_username_to_find_user(monkeypatch):
+    messages = []
+    conn.db()[tg_chat._name].delete_many({})
+    user_id = ObjectId()
+    conn.execute(insert_one(app_user, {
+        '_id': user_id,
+        'settings': {'telegram': 'directchat'},
+    }))
+    conn.execute(insert_one(tg_chat, {
+        '_id': 6,
+        'telegramUsername': 'directchat',
+        'status': 'active',
+    }))
+    monkeypatch.setattr('scheduler.tasks.match_telegram_chats.send_telegram_message',
+                        lambda *args: messages.append(args))
+
+    MatchTelegramChatsTask().execute({'telegramUsername': 'directchat', 'baseUrl': 'http://sadist.test'})
+
+    user = conn.db()[app_user._name].find_one({'_id': user_id})
+    assert user['extra']['telegramChatIds'] == [6]
+    assert messages == [(6, 'Welcome, directchat! Your telegram has been added. Explore more fresh data at http://sadist.test!')]
 
 
 def test_match_telegram_chats_skips_unmatched_welcome_without_chat_id(monkeypatch):

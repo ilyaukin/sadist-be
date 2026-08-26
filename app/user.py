@@ -98,6 +98,8 @@ def update_settings():
     session['user'] = user
     if telegram_updated:
         create_task('match_telegram_chats', EXECUTION_TYPE_SINGLE, {
+            'userId': str(user_id),
+            'telegramUsername': settings.get('telegram'),
             'baseUrl': get_base_url('http://localhost'),
         })
     return _user_response(user)
