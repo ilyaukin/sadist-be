@@ -94,6 +94,7 @@ def test_telegram_webhook_pause_and_resume(client, monkeypatch):
     conn.db()[tg_chat._name].delete_many({})
 
     for command, expected_status in [('/pause', 'paused'), ('/resume', 'active')]:
+        conn.db()[task_active._name].delete_many({'taskType': 'match_telegram_chats'})
         with client.application.test_request_context(
                 '/telegram/webhook',
                 method='POST',
@@ -106,6 +107,8 @@ def test_telegram_webhook_pause_and_resume(client, monkeypatch):
                 headers={'X-Telegram-Bot-Api-Secret-Token': 'secret'}):
             telegram_webhook()
         assert conn.db()[tg_chat._name].find_one({'_id': 123})['status'] == expected_status
+        task = conn.db()[task_active._name].find_one({'taskType': 'match_telegram_chats'})
+        assert task['payload']['status'] == expected_status
 
 
 def test_telegram_webhook_keeps_paused_status_until_resume(client, monkeypatch):
@@ -156,6 +159,30 @@ def test_match_telegram_chats_binds_user_and_sends_matched_welcome(monkeypatch):
     assert user['extra']['telegramChatIds'] == [1, 2]
     assert user['extra']['telegramUsername'] == 'matcheduser'
     assert messages == [(2, 'Welcome, matcheduser! Your telegram has been added. Explore more fresh data at http://sadist.test!')]
+
+
+def test_match_telegram_chats_sends_status_message_for_existing_binding(monkeypatch):
+    messages = []
+    conn.db()[tg_chat._name].delete_many({})
+    user_id = ObjectId()
+    conn.execute(insert_one(app_user, {
+        '_id': user_id,
+        'settings': {'telegram': 'matcheduser'},
+        'extra': {'telegramChatIds': [2]},
+    }))
+    conn.execute(insert_one(tg_chat, {
+        '_id': 2,
+        'telegramUsername': 'matcheduser',
+        'status': 'paused',
+    }))
+    monkeypatch.setattr('scheduler.tasks.match_telegram_chats.send_telegram_message',
+                        lambda *args: messages.append(args))
+
+    MatchTelegramChatsTask().execute({'chatId': 2, 'status': 'paused', 'baseUrl': 'http://sadist.test'})
+
+    user = conn.db()[app_user._name].find_one({'_id': user_id})
+    assert user['extra']['telegramChatIds'] == [2]
+    assert messages == [(2, 'matcheduser, your notifications are paused')]
 
 
 def test_match_telegram_chats_sends_unmatched_welcome(monkeypatch):

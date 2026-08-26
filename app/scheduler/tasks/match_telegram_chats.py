@@ -7,6 +7,7 @@ from scheduler.task_interface import Task
 
 MATCHED_MESSAGE = 'Welcome, {username}! Your telegram has been added. Explore more fresh data at {base_url}!'
 UNMATCHED_MESSAGE = 'Welcome, {username}! Add your telegram at {base_url} to get notifications about new data.'
+STATUS_MESSAGE = '{username}, your notifications are {status}'
 
 
 @Task.sub('match_telegram_chats')
@@ -21,6 +22,8 @@ class MatchTelegramChatsTask(Task):
             raise ValueError('userId must not be empty')
         if payload.get('telegramUsername') is not None and payload.get('telegramUsername') == '':
             raise ValueError('telegramUsername must not be empty')
+        if payload.get('status') is not None and payload.get('status') == '':
+            raise ValueError('status must not be empty')
         if not payload.get('baseUrl'):
             raise ValueError('baseUrl is required')
 
@@ -30,7 +33,7 @@ class MatchTelegramChatsTask(Task):
         user = _get_user(payload.get('userId'), payload.get('telegramUsername'))
         chats = _get_chats(chat_id, payload.get('telegramUsername'), user)
         for chat in chats:
-            _match_chat(chat, user, payload['baseUrl'], chat_id is not None)
+            _match_chat(chat, user, payload['baseUrl'], payload.get('status'), chat_id is not None)
 
 
 def _get_chats(chat_id=None, telegram_username=None, user=None):
@@ -59,14 +62,18 @@ def _object_id(value):
     return ObjectId(value)
 
 
-def _match_chat(chat: dict, user: dict, base_url: str, notify_unmatched: bool):
+def _match_chat(chat: dict, user: dict, base_url: str, status: str, notify_unmatched: bool):
     username = chat.get('telegramUsername')
     if not username:
         return
     user = user or next(iter(conn.execute(query(app_user).filter(app_user.settings.telegram == username))), None)
     if user:
-        _bind_chat_to_user(user, chat)
-        message = MATCHED_MESSAGE.format(username=username, base_url=base_url)
+        is_new_binding = _bind_chat_to_user(user, chat)
+        if is_new_binding:
+            message = MATCHED_MESSAGE.format(username=username, base_url=base_url)
+        else:
+            status = status or chat.get('status') or 'active'
+            message = STATUS_MESSAGE.format(username=username, status=status)
     elif notify_unmatched:
         message = UNMATCHED_MESSAGE.format(username=username, base_url=base_url)
     else:
@@ -76,10 +83,18 @@ def _match_chat(chat: dict, user: dict, base_url: str, notify_unmatched: bool):
 
 def _bind_chat_to_user(user: dict, chat: dict):
     # TODO: implement `$addToSet` support in mongomoron.
-    conn.db()[app_user._name].update_one(
-        {'_id': user['_id']},
+    result = conn.db()[app_user._name].update_one(
+        {'_id': user['_id'], 'extra.telegramChatIds': {'$ne': chat['_id']}},
         {
             '$addToSet': {'extra.telegramChatIds': chat['_id']},
             '$set': {'extra.telegramUsername': chat.get('telegramUsername')},
         },
     )
+    if result.modified_count:
+        return True
+    # TODO: implement `$set` support for nested fields in mongomoron update builders if needed.
+    conn.db()[app_user._name].update_one(
+        {'_id': user['_id']},
+        {'$set': {'extra.telegramUsername': chat.get('telegramUsername')}},
+    )
+    return False

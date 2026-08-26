@@ -27,11 +27,14 @@ def telegram_webhook():
 
     status = _status_from_command(message.get('text'))
     _save_chat(chat_id, username, status, update_data)
-    create_task('match_telegram_chats', EXECUTION_TYPE_SINGLE, {
+    payload = {
         'chatId': chat_id,
         'telegramUsername': username,
         'baseUrl': get_base_url('http://localhost'),
-    })
+    }
+    if status:
+        payload['status'] = status
+    create_task('match_telegram_chats', EXECUTION_TYPE_SINGLE, payload)
     return {'success': True}
 
 
