@@ -82,9 +82,11 @@ wc_script_template = Collection('wc_script_template')
 
 task_active = Collection('task_active')
 task_archive = Collection('task_archive')
-ds_subscription = Collection('ds_subscription')
 
-datetime_tracked_collections = [ds_list, app_user, app_user_session, task_active, task_archive, ds_subscription]
+ds_subscription = Collection('ds_subscription')
+tg_chat = Collection('tg_chat')
+
+datetime_tracked_collections = [ds_list, app_user, app_user_session, task_active, task_archive, ds_subscription, tg_chat]
 
 
 @conn.add_hook(Operation.INSERT, datetime_tracked_collections)

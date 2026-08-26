@@ -3,21 +3,24 @@ import secrets
 from typing import Optional
 
 import jwt
+from bson import ObjectId
 from app import app, logger
 from app.email_helper import send_email
+from app.telegram_helper import normalize_telegram_username
 from app.url_helper import get_base_url
 from collections_helper import deep_merge
 from db import conn, app_user
 from flask import request, session
 from jwt import PyJWKClient
 from mongomoron import insert_one, update_one, query_one, and_, or_
+from scheduler.task_interface import create_task, EXECUTION_TYPE_SINGLE
 from serializer import serialize
 from user_helper import anon_
 
 
 @app.route('/user/whoami')
 def whoami():
-    return user_response(session.get("user", anon_))
+    return _user_response(session.get("user", anon_))
 
 
 @app.route('/user/login', methods=['POST'])
@@ -33,13 +36,13 @@ def login():
     else:
         user.lookup()
         session["user"] = user.create_or_update()
-    return user_response(session["user"])
+    return _user_response(session["user"])
 
 
 @app.route('/user/logout', methods=['POST'])
 def logout():
     del session["user"]
-    return user_response(anon_)
+    return _user_response(anon_)
 
 
 @app.route('/user/signup', methods=['POST'])
@@ -54,7 +57,7 @@ def signup():
 
     user = LocalUser.signup(u)
 
-    return user_response(user.create_or_update())
+    return _user_response(user.create_or_update())
 
 
 @app.route('/user/confirm/<confirmation_hash>', methods=['GET'])
@@ -67,7 +70,49 @@ def confirm(confirmation_hash):
         return 'Email has not been confirmed: ' + str(e)
 
 
-def user_response(u: dict):
+@app.route('/user/settings', methods=['PATCH'])
+def update_settings():
+    """Update current user's settings."""
+    if 'user' not in session:
+        raise Exception('Authorization is required')
+    payload = request.get_json() or {}
+    settings = payload.get('settings', payload)
+    if not isinstance(settings, dict):
+        raise ValueError('settings must be an object')
+    settings = dict(settings)
+    telegram_provided = 'telegram' in settings
+    if telegram_provided:
+        settings['telegram'] = normalize_telegram_username(settings.get('telegram'))
+
+    user_id = _db_user_id(session['user']['_id'])
+    user = conn.execute(query_one(app_user).filter(app_user._id == user_id))
+    current_settings = user.get('settings') or {}
+    telegram_updated = telegram_provided and settings.get('telegram') != current_settings.get('telegram')
+    settings = deep_merge(settings, user.get('settings') or {})
+    conn.execute(
+        update_one(app_user)
+            .filter(app_user._id == user_id)
+            .set({'settings': settings})
+    )
+    user = conn.execute(query_one(app_user).filter(app_user._id == user_id))
+    session['user'] = user
+    if telegram_updated:
+        create_task('match_telegram_chats', EXECUTION_TYPE_SINGLE, {
+            'baseUrl': get_base_url('http://localhost'),
+        })
+    return _user_response(user)
+
+
+def _db_user_id(user_id):
+    if isinstance(user_id, ObjectId):
+        return user_id
+    try:
+        return ObjectId(user_id)
+    except Exception:
+        return user_id
+
+
+def _user_response(u: dict):
     # we don't want to reveal extra, toConfirm or hashes
     clean_u = dict((key, value) for key, value in u.items()
                    if key != 'extra' and key != 'toConfirm'

@@ -2,7 +2,7 @@ from bson import ObjectId
 from mongomoron import insert_one, query
 
 from app import root
-from db import app_user, conn, ds, ds_classification, ds_list, ds_subscription, task_active
+from db import app_user, conn, ds, ds_classification, ds_list, ds_subscription, task_active, tg_chat
 from scheduler.task_interface import EXECUTION_TYPE_SINGLE
 from scheduler.tasks.cleanup_old_ds import CleanupOldDsTask
 from scheduler.tasks.classify_ds import ClassifyDsTask
@@ -178,8 +178,8 @@ def test_detailize_cols_updates_status_on_error(monkeypatch):
     }
 
 
-def test_notify_ds_subscribers_sends_one_message_for_new_documents(monkeypatch):
-    emails = []
+def test_notify_ds_subscribers_creates_email_task_for_new_documents():
+    _clear_notification_tasks()
     user_id = ObjectId()
     old_ds_id = ObjectId()
     new_ds_id = ObjectId()
@@ -213,8 +213,6 @@ def test_notify_ds_subscribers_sends_one_message_for_new_documents(monkeypatch):
         {'_id': 3, 'category': 'books', 'sku': 'new-2'},
         {'_id': 4, 'category': 'games', 'sku': 'ignored'},
     ])
-    monkeypatch.setattr('scheduler.tasks.notify_ds_subscribers.send_email',
-                        lambda *args: emails.append(args))
 
     NotifyDsSubscribersTask().execute({
         'dsId': str(new_ds_id),
@@ -222,15 +220,16 @@ def test_notify_ds_subscribers_sends_one_message_for_new_documents(monkeypatch):
         'baseUrl': 'http://sadist.test',
     })
 
-    assert emails == [(
-        'user@example.com',
-        'DS prices.csv has updates',
-        'Found 2 new price for new-1: http://sadist.test/?id=%s' % new_ds_id,
-    )]
+    task = _get_active_task('send_email_notification')
+    assert task['payload'] == {
+        'toEmail': 'user@example.com',
+        'subject': 'DS prices.csv has updates',
+        'message': 'Found 2 new price for new-1: http://sadist.test/?id=%s' % new_ds_id,
+    }
 
 
-def test_notify_ds_subscribers_skips_user_with_empty_channels(monkeypatch):
-    emails = []
+def test_notify_ds_subscribers_skips_user_with_empty_channels():
+    _clear_notification_tasks()
     user_id = ObjectId()
     old_ds_id = ObjectId()
     new_ds_id = ObjectId()
@@ -250,8 +249,6 @@ def test_notify_ds_subscribers_skips_user_with_empty_channels(monkeypatch):
     }))
     conn.db()[ds[old_ds_id]._name].insert_one({'_id': 1, 'sku': 'old'})
     conn.db()[ds[new_ds_id]._name].insert_one({'_id': 2, 'sku': 'new'})
-    monkeypatch.setattr('scheduler.tasks.notify_ds_subscribers.send_email',
-                        lambda *args: emails.append(args))
 
     NotifyDsSubscribersTask().execute({
         'dsId': str(new_ds_id),
@@ -259,11 +256,12 @@ def test_notify_ds_subscribers_skips_user_with_empty_channels(monkeypatch):
         'baseUrl': 'http://sadist.test',
     })
 
-    assert emails == []
+    assert _get_active_task('send_email_notification') is None
+    assert _get_active_task('send_telegram_notification') is None
 
 
-def test_notify_ds_subscribers_uses_default_email_channel(monkeypatch):
-    emails = []
+def test_notify_ds_subscribers_uses_default_email_channel():
+    _clear_notification_tasks()
     user_id = ObjectId()
     old_ds_id = ObjectId()
     new_ds_id = ObjectId()
@@ -283,8 +281,6 @@ def test_notify_ds_subscribers_uses_default_email_channel(monkeypatch):
     }))
     conn.db()[ds[old_ds_id]._name].insert_one({'_id': 1, 'sku': 'old'})
     conn.db()[ds[new_ds_id]._name].insert_one({'_id': 2, 'sku': 'new'})
-    monkeypatch.setattr('scheduler.tasks.notify_ds_subscribers.send_email',
-                        lambda *args: emails.append(args))
 
     NotifyDsSubscribersTask().execute({
         'dsId': str(new_ds_id),
@@ -292,7 +288,47 @@ def test_notify_ds_subscribers_uses_default_email_channel(monkeypatch):
         'baseUrl': 'http://sadist.test',
     })
 
-    assert emails == [('user@example.com', 'DS prices.csv has updates', 'new')]
+    task = _get_active_task('send_email_notification')
+    assert task['payload'] == {
+        'toEmail': 'user@example.com',
+        'subject': 'DS prices.csv has updates',
+        'message': 'new',
+    }
+
+
+def test_notify_ds_subscribers_creates_telegram_task_for_active_chats():
+    _clear_notification_tasks()
+    conn.db()[tg_chat._name].delete_many({})
+    user_id = ObjectId()
+    old_ds_id = ObjectId()
+    new_ds_id = ObjectId()
+    conn.execute(insert_one(app_user, {
+        '_id': user_id,
+        'extra': {'telegramChatIds': [1, 2]},
+        'settings': {'notificationChannels': ['telegram']},
+    }))
+    conn.execute(insert_one(tg_chat, {'_id': 1, 'telegramUsername': 'user', 'status': 'active'}))
+    conn.execute(insert_one(tg_chat, {'_id': 2, 'telegramUsername': 'user', 'status': 'paused'}))
+    conn.execute(insert_one(ds_list, {'_id': old_ds_id, 'name': 'prices.csv', 'status': 'old'}))
+    conn.execute(insert_one(ds_list, {'_id': new_ds_id, 'name': 'prices.csv', 'status': 'active'}))
+    conn.execute(insert_one(ds_subscription, {
+        'dsName': 'prices.csv',
+        'query': {},
+        'fields': ['sku'],
+        'message': '{sku}',
+        'userIds': [str(user_id)],
+    }))
+    conn.db()[ds[old_ds_id]._name].insert_one({'_id': 1, 'sku': 'old'})
+    conn.db()[ds[new_ds_id]._name].insert_one({'_id': 2, 'sku': 'new'})
+
+    NotifyDsSubscribersTask().execute({
+        'dsId': str(new_ds_id),
+        'dsName': 'prices.csv',
+        'baseUrl': 'http://sadist.test',
+    })
+
+    task = _get_active_task('send_telegram_notification')
+    assert task['payload'] == {'chatId': 1, 'message': 'new'}
 
 
 def test_notify_ds_subscribers_raises_key_error_for_missing_message_field():
@@ -328,8 +364,8 @@ def test_notify_ds_subscribers_raises_key_error_for_missing_message_field():
         assert False
 
 
-def test_notify_ds_subscribers_skips_without_previous_old_ds(monkeypatch):
-    emails = []
+def test_notify_ds_subscribers_skips_without_previous_old_ds():
+    _clear_notification_tasks()
     new_ds_id = ObjectId()
     conn.execute(insert_one(ds_list, {'_id': new_ds_id, 'name': 'no-old.csv', 'status': 'active'}))
     conn.execute(insert_one(ds_subscription, {
@@ -340,8 +376,6 @@ def test_notify_ds_subscribers_skips_without_previous_old_ds(monkeypatch):
         'userIds': [str(ObjectId())],
     }))
     conn.db()[ds[new_ds_id]._name].insert_one({'_id': 1, 'sku': 'new'})
-    monkeypatch.setattr('scheduler.tasks.notify_ds_subscribers.send_email',
-                        lambda *args: emails.append(args))
 
     NotifyDsSubscribersTask().execute({
         'dsId': str(new_ds_id),
@@ -349,11 +383,18 @@ def test_notify_ds_subscribers_skips_without_previous_old_ds(monkeypatch):
         'baseUrl': 'http://sadist.test',
     })
 
-    assert emails == []
+    assert _get_active_task('send_email_notification') is None
+    assert _get_active_task('send_telegram_notification') is None
 
 
 def _get_active_task(task_type: str, filter_=None):
     return conn.db()[task_active._name].find_one({'taskType': task_type, **(filter_ or {})})
+
+
+def _clear_notification_tasks():
+    conn.db()[task_active._name].delete_many({
+        'taskType': {'$in': ['send_email_notification', 'send_telegram_notification']}
+    })
 
 
 def _get_ds_list_record(ds_id):
