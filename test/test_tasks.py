@@ -296,6 +296,7 @@ def test_notify_ds_subscribers_uses_default_email_channel(monkeypatch):
 
 
 def test_notify_ds_subscribers_raises_key_error_for_missing_message_field():
+    conn.db()[ds_subscription._name].delete_many({})
     user_id = ObjectId()
     old_ds_id = ObjectId()
     new_ds_id = ObjectId()
