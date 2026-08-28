@@ -2,8 +2,8 @@ from bson import ObjectId
 from flask import session
 from mongomoron import insert_one
 
-from db import conn, ds_subscription
-from app.subscription import create_subscription, list_ds_subscriptions, list_my_subscriptions, subscribe, unsubscribe, unsubscribe_all
+from db import app_user, conn, ds, ds_list, ds_subscription
+from app.subscription import create_subscription, list_ds_subscriptions, list_my_subscriptions, subscribe, send_test_subscription, unsubscribe, unsubscribe_all
 
 
 def test_create_and_list_subscription(client):
@@ -109,3 +109,67 @@ def test_create_subscription_rejects_operator_query(client):
             assert str(e) == 'Only simple equality query is supported'
         else:
             assert False
+
+
+def test_test_subscription_sends_message_to_current_user(client, monkeypatch):
+    emails = []
+    user_id = ObjectId()
+    ds_id = ObjectId()
+    subscription_id = ObjectId()
+    conn.execute(insert_one(app_user, {
+        '_id': user_id,
+        'extra': {'email': 'user@example.com'},
+    }))
+    conn.execute(insert_one(ds_list, {
+        '_id': ds_id,
+        'name': 'test-prices.csv',
+        'status': 'active',
+    }))
+    conn.db()[ds[ds_id]._name].insert_one({
+        '_id': 1,
+        'sku': 'book-1',
+    })
+    conn.execute(insert_one(ds_subscription, {
+        '_id': subscription_id,
+        'dsName': 'test-prices.csv',
+        'query': {},
+        'fields': ['sku'],
+        'message': 'Found {$#} test price for {sku}: {$url}',
+        'userIds': [],
+    }))
+    monkeypatch.setattr('scheduler.tasks.notify_ds_subscribers.send_email',
+                        lambda *args: emails.append(args))
+
+    with client.application.test_request_context('/subscriptions/%s/test' % subscription_id, method='POST'):
+        session['user'] = {'_id': str(user_id), 'type': 'local'}
+        assert send_test_subscription(str(subscription_id)) == {'success': True}
+
+    assert emails == [(
+        'user@example.com',
+        'DS test-prices.csv has updates',
+        'Found 1 test price for book-1: http://localhost/?id=%s' % ds_id,
+    )]
+
+
+def test_test_subscription_returns_404_for_empty_ds(client):
+    user_id = ObjectId()
+    ds_id = ObjectId()
+    subscription_id = ObjectId()
+    conn.execute(insert_one(ds_list, {
+        '_id': ds_id,
+        'name': 'empty.csv',
+        'status': 'active',
+    }))
+    conn.execute(insert_one(ds_subscription, {
+        '_id': subscription_id,
+        'dsName': 'empty.csv',
+        'query': {},
+        'fields': ['sku'],
+        'message': '{sku}',
+        'userIds': [],
+    }))
+
+    with client.application.test_request_context('/subscriptions/%s/test' % subscription_id, method='POST'):
+        session['user'] = {'_id': str(user_id), 'type': 'local'}
+        assert send_test_subscription(str(subscription_id)) == ({'error': 'DS is missing or empty: empty.csv'}, 404)
+    conn.db()[ds_subscription._name].delete_many({})

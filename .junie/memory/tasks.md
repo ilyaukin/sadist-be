@@ -116,6 +116,20 @@ We may also want to update `app_user` collection to add something like `{"settin
   }
   ```
 
+- `POST /subscriptions/<subsciption_id>/test`: test sending a message for the subscriptions.
+  - Instead of matching changing documents, take the first document in the active DS by name.
+  - If DS doesn't exist or empty, return `{"error": "DS is missing or empty: {name}"}`, 404.
+  - Proceed with sending a subscription message for the current user only.
+  - If there is no exception, respond with `{"success": true}`.
+  - If there is an exception, the response will be handled with the Flask exception handler.
+
+  Response body:
+  ```json
+  {
+    "success": true
+  }
+  ```
+
 #### DS processing logic
 
 - When a new DS is uploaded, create a task that will do the following:

@@ -1,9 +1,10 @@
 from bson import ObjectId
 from flask import request, session
-from mongomoron import delete, insert_one, query
+from mongomoron import delete, insert_one, query, query_one
 
 from app import app
-from db import conn, ds_subscription
+from db import conn, ds, ds_list, ds_subscription
+from scheduler.tasks.notify_ds_subscribers import _format_message, _send_subscription_message
 
 
 @app.route('/subscribe', methods=['POST'])
@@ -76,6 +77,28 @@ def list_my_subscriptions():
     user_id = _current_user_id()
     items = conn.execute(query(ds_subscription).filter(ds_subscription.userIds == user_id))
     return {'list': [_subscription_response(item) for item in items], 'success': True}
+
+
+@app.route('/subscriptions/<subscription_id>/test', methods=['POST'])
+def send_test_subscription(subscription_id):
+    """Send a test DS subscription message to the current user."""
+    user_id = _current_user_id()
+    subscription = conn.execute(query_one(ds_subscription).filter(
+        ds_subscription._id == ObjectId(subscription_id)))
+    ds_record = conn.execute(query_one(ds_list).filter(
+        ds_list.name == subscription['dsName']).filter(ds_list.status == 'active'))
+    if not ds_record:
+        return {'error': 'DS is missing or empty: %s' % subscription['dsName']}, 404
+
+    document = conn.execute(query_one(ds[ds_record['_id']]))
+    if not document:
+        return {'error': 'DS is missing or empty: %s' % subscription['dsName']}, 404
+
+    test_subscription = {**subscription, 'userIds': [user_id]}
+    message = _format_message(test_subscription, [document], str(ds_record['_id']),
+                              request.host_url.rstrip('/'))
+    _send_subscription_message(test_subscription, message)
+    return {'success': True}
 
 
 def _validate_subscription_payload(payload: dict):
