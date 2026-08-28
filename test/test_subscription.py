@@ -2,7 +2,7 @@ from bson import ObjectId
 from flask import session
 from mongomoron import insert_one
 
-from db import app_user, conn, ds, ds_list, ds_subscription
+from db import app_user, conn, ds, ds_list, ds_subscription, task_active
 from app.subscription import create_subscription, list_ds_subscriptions, list_my_subscriptions, subscribe, send_test_subscription, unsubscribe, unsubscribe_all
 
 
@@ -111,8 +111,8 @@ def test_create_subscription_rejects_operator_query(client):
             assert False
 
 
-def test_test_subscription_sends_message_to_current_user(client, monkeypatch):
-    emails = []
+def test_test_subscription_sends_message_to_current_user(client):
+    conn.db()[task_active._name].delete_many({})
     user_id = ObjectId()
     ds_id = ObjectId()
     subscription_id = ObjectId()
@@ -137,21 +137,20 @@ def test_test_subscription_sends_message_to_current_user(client, monkeypatch):
         'message': 'Found {$#} test price for {sku}: {$url}',
         'userIds': [],
     }))
-    monkeypatch.setattr('scheduler.tasks.notify_ds_subscribers.send_email',
-                        lambda *args: emails.append(args))
-
     with client.application.test_request_context('/subscriptions/%s/test' % subscription_id, method='POST'):
         session['user'] = {'_id': str(user_id), 'type': 'local'}
         assert send_test_subscription(str(subscription_id)) == {'success': True}
 
-    assert emails == [(
-        'user@example.com',
-        'DS test-prices.csv has updates',
-        'Found 1 test price for book-1: http://localhost/?id=%s' % ds_id,
-    )]
+    task = conn.db()[task_active._name].find_one({'taskType': 'send_email_notification'})
+    assert task['payload'] == {
+        'toEmail': 'user@example.com',
+        'subject': 'DS test-prices.csv has updates',
+        'message': 'Found 1 test price for book-1: http://localhost/?id=%s' % ds_id,
+    }
 
 
 def test_test_subscription_returns_404_for_empty_ds(client):
+    conn.db()[task_active._name].delete_many({})
     user_id = ObjectId()
     ds_id = ObjectId()
     subscription_id = ObjectId()
@@ -172,4 +171,5 @@ def test_test_subscription_returns_404_for_empty_ds(client):
     with client.application.test_request_context('/subscriptions/%s/test' % subscription_id, method='POST'):
         session['user'] = {'_id': str(user_id), 'type': 'local'}
         assert send_test_subscription(str(subscription_id)) == ({'error': 'DS is missing or empty: empty.csv'}, 404)
+    assert conn.db()[task_active._name].find_one({'taskType': 'send_email_notification'}) is None
     conn.db()[ds_subscription._name].delete_many({})

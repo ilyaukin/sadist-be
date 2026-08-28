@@ -17,4 +17,4 @@ if os.path.exists('logging.ini'):
     logger.handlers.clear()
     logging.config.fileConfig('logging.ini', disable_existing_loggers=False)
 
-from . import root, error_handler, user, labelling, debug, web_crawler, extra_pages, image_api, subscription
+from . import root, error_handler, user, labelling, debug, web_crawler, extra_pages, image_api, subscription, telegram

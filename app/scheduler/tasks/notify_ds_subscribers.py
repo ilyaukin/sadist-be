@@ -5,9 +5,8 @@ import pymongo
 from bson import ObjectId
 from mongomoron import query
 
-from app.email_helper import send_email
-from db import app_user, conn, ds, ds_list, ds_subscription
-from scheduler.task_interface import Task
+from db import app_user, conn, ds, ds_list, ds_subscription, tg_chat
+from scheduler.task_interface import Task, create_task, EXECUTION_TYPE_SINGLE
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +87,29 @@ def _send_subscription_message(subscription: dict, message: str):
         channels = _get_notification_channels(user)
         for channel in channels:
             if channel == 'email':
-                email = user.get('extra', {}).get('email')
-                logger.info(f"Sending email notification\nTo: {email}\nMessage: {message}")
-                if email:
-                    send_email(email, subject, message)
+                _create_email_notification(user, subject, message)
+            if channel == 'telegram':
+                _create_telegram_notifications(user, message)
+
+
+def _create_email_notification(user: dict, subject: str, message: str):
+    email = user.get('extra', {}).get('email')
+    logger.info(f"Queueing email notification\nTo: {email}\nMessage: {message}")
+    if email:
+        create_task('send_email_notification', EXECUTION_TYPE_SINGLE, {
+            'toEmail': email,
+            'subject': subject,
+            'message': message,
+        })
+
+
+def _create_telegram_notifications(user: dict, message: str):
+    chat_ids = user.get('extra', {}).get('telegramChatIds') or []
+    for chat in _get_active_chats(chat_ids):
+        create_task('send_telegram_notification', EXECUTION_TYPE_SINGLE, {
+            'chatId': chat['_id'],
+            'message': message,
+        })
 
 
 def _get_notification_channels(user: dict):
@@ -105,6 +123,16 @@ def _find_ds_documents(ds_id: str, subscription_query: dict):
     q = query(ds[ds_id])
     q.query_filer_document.update(subscription_query)
     return conn.execute(q)
+
+
+def _get_active_chats(chat_ids: list):
+    if not chat_ids:
+        return []
+    # TODO: implement `in` query helper usage for Telegram chat ID lists in mongomoron.
+    return conn.db()[tg_chat._name].find({
+        '_id': {'$in': chat_ids},
+        'status': 'active',
+    })
 
 
 def _get_subscribed_users(user_ids: list[str]):
